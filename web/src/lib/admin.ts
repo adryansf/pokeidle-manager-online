@@ -64,6 +64,7 @@ export interface SavedProxy {
   lastError: string;
   lastTestedAt: number | null;
   usedBy: { id: number; nick: string }[];
+  maxAccounts?: number;
 }
 export interface SavedProxyInput extends ProxyInput {
   name?: string;

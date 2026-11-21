@@ -96,10 +96,13 @@ export function ProxyPicker({
       >
         <option value="">— Escolher um proxy salvo da Central —</option>
         {proxies.map((p) => {
+          const maxAcc = p.maxAccounts ?? 4;
+          const full = p.usedBy.length >= maxAcc && selectedId !== p.id;
           const statusIcon = p.lastOk === true ? "🟢" : p.lastOk === false ? "🔴" : "⚪";
-          const used = p.usedBy.length > 0 ? ` · em uso: ${p.usedBy.map((u) => u.nick).join(", ")}` : " · livre";
+          const cap = `${p.usedBy.length}/${maxAcc}`;
+          const used = p.usedBy.length > 0 ? ` · ${cap}${full ? " LOTADO" : ""}: ${p.usedBy.map((u) => u.nick).join(", ")}` : ` · ${cap} livre`;
           return (
-            <option key={p.id} value={p.id}>
+            <option key={p.id} value={p.id} disabled={full}>
               {statusIcon} {p.name} ({p.scheme}://{p.host}:{p.port}){used}
             </option>
           );
@@ -607,6 +610,25 @@ export function ProxyCenterSection({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                      {(() => {
+                        const maxAcc = p.maxAccounts ?? 4;
+                        const count = p.usedBy.length;
+                        const full = count >= maxAcc;
+                        return (
+                          <span
+                            className={`tnum rounded-md border px-2 py-0.5 text-[11px] font-extrabold ${
+                              full
+                                ? "border-[#7a2f27] bg-[#32140f] text-poke-red"
+                                : count >= maxAcc - 1
+                                  ? "border-[#7a5a1c] bg-[#33260e] text-poke-gold"
+                                  : "border-line bg-void text-mute"
+                            }`}
+                            title={`Limite máximo de ${maxAcc} contas neste proxy`}
+                          >
+                            {full ? `Lotado (${count}/${maxAcc})` : `${count}/${maxAcc} contas`}
+                          </span>
+                        );
+                      })()}
                       {p.usedBy.length > 0 ? (
                         p.usedBy.map((u) => (
                           <span
@@ -627,26 +649,38 @@ export function ProxyCenterSection({
 
                   {/* Ações do proxy */}
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {accounts.length > 0 && (
-                      <select
-                        className="field h-9 py-1 text-xs font-semibold"
-                        value=""
-                        disabled={isAssigning}
-                        aria-label={`Aplicar ${p.name} em uma conta`}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v) void assignTo(p, v);
-                        }}
-                      >
-                        <option value="">{isAssigning ? "Aplicando…" : "Aplicar na conta…"}</option>
-                        {accounts.map((a) => (
-                          <option key={a.numericId} value={a.numericId}>
-                            → {a.nick}
+                    {accounts.length > 0 && (() => {
+                      const maxAcc = p.maxAccounts ?? 4;
+                      const usedIds = new Set(p.usedBy.map((u) => u.id));
+                      const full = usedIds.size >= maxAcc;
+                      const availableAccounts = accounts.filter((a) => !usedIds.has(a.numericId));
+                      const canAll = new Set([...usedIds, ...accounts.map((a) => a.numericId)]).size <= maxAcc;
+                      return (
+                        <select
+                          className="field h-9 py-1 text-xs font-semibold disabled:opacity-50"
+                          value=""
+                          disabled={isAssigning || full || availableAccounts.length === 0}
+                          aria-label={`Aplicar ${p.name} em uma conta`}
+                          title={full ? `Limite de ${maxAcc} contas atingido neste proxy` : undefined}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (v) void assignTo(p, v);
+                          }}
+                        >
+                          <option value="">
+                            {isAssigning ? "Aplicando…" : full ? `Lotado (${usedIds.size}/${maxAcc})` : "Aplicar na conta…"}
                           </option>
-                        ))}
-                        {accounts.length > 1 && <option value="all">→ Todas as contas ({accounts.length})</option>}
-                      </select>
-                    )}
+                          {availableAccounts.map((a) => (
+                            <option key={a.numericId} value={a.numericId}>
+                              → {a.nick}
+                            </option>
+                          ))}
+                          {accounts.length > 1 && canAll && (
+                            <option value="all">→ Todas as contas ({accounts.length})</option>
+                          )}
+                        </select>
+                      );
+                    })()}
                     <button
                       type="button"
                       className="btn h-9 px-2.5 text-xs"

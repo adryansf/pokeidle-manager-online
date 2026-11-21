@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import secrets
 import time
@@ -398,6 +399,8 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
         for r in store.list_accounts():
             if r["token"] == creds["token"] or r["nick"].lower() == creds["nick"].lower():
                 return JSONResponse({"error": f"A conta {r['nick']} já está cadastrada."}, status_code=409)
+        if (perr := _check_proxy_limit(proxy)):
+            return JSONResponse({"error": perr}, status_code=409)
         data = {**creds, "proxy": proxy, "options": _options_dict(body.options), "enabled": True}
         test = None
         if not body.skip_test:
@@ -447,6 +450,9 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
                 changes["options"] = _options_dict(body.options)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
+        if "proxy" in changes:
+            if (perr := _check_proxy_limit(changes["proxy"], exclude_acc_id=acc_id)):
+                return JSONResponse({"error": perr}, status_code=409)
         await manager.update(acc_id, changes)
         return {"ok": True, "account": _public(store.get_account(acc_id))}
 
@@ -503,11 +509,40 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
         return {"ok": True, "ip": ip}
 
     # ---------------------------------------------------------- Central de Proxies
+    MAX_ACCOUNTS_PER_PROXY = max(1, int(os.getenv("MAX_ACCOUNTS_PER_PROXY", "4") or 4))
+
     def _proxy_key(p: dict | None) -> tuple | None:
         if not p or not p.get("host"):
             return None
         return (str(p.get("scheme") or "socks5").lower(), str(p["host"]).strip().lower(),
                 int(p.get("port") or 0), str(p.get("username") or ""))
+
+    def _check_proxy_limit(proxy: dict | None, *, exclude_acc_id: int | None = None,
+                           adding_ids: set[int] | None = None) -> str | None:
+        """Bloqueia atribuir o mesmo proxy a mais de MAX_ACCOUNTS_PER_PROXY (4) contas."""
+        key = _proxy_key(proxy)
+        if key is None:
+            return None
+        accs = store.list_accounts()
+        users = [
+            a for a in accs
+            if _proxy_key(a.get("proxy")) == key and (exclude_acc_id is None or a["id"] != exclude_acc_id)
+        ]
+        if adding_ids is not None:
+            existing_ids = {a["id"] for a in users}
+            final_ids = existing_ids | set(adding_ids)
+            if len(final_ids) > MAX_ACCOUNTS_PER_PROXY:
+                free = max(0, MAX_ACCOUNTS_PER_PROXY - len(existing_ids))
+                nicks = ", ".join(a["nick"] for a in users)
+                detail = f" ({nicks})" if nicks else ""
+                if free == 0:
+                    return f"Limite de {MAX_ACCOUNTS_PER_PROXY} contas por proxy atingido: este proxy já está lotado ({len(existing_ids)}/{MAX_ACCOUNTS_PER_PROXY}){detail}."
+                return f"Limite de {MAX_ACCOUNTS_PER_PROXY} contas por proxy: este proxy já tem {len(existing_ids)}/{MAX_ACCOUNTS_PER_PROXY}{detail} — só cabem mais {free} conta(s)."
+            return None
+        if len(users) >= MAX_ACCOUNTS_PER_PROXY:
+            nicks = ", ".join(a["nick"] for a in users)
+            return f"Limite de {MAX_ACCOUNTS_PER_PROXY} contas por proxy atingido: este proxy já está em uso por {len(users)}/{MAX_ACCOUNTS_PER_PROXY} contas ({nicks}). Escolha outro proxy."
+        return None
 
     def _proxy_public(row: dict, accounts: list[dict] | None = None) -> dict:
         accs = accounts if accounts is not None else store.list_accounts()
@@ -532,6 +567,7 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
             "lastError": row["last_error"],
             "lastTestedAt": int(row["last_tested_at"] * 1000) if row["last_tested_at"] else None,
             "usedBy": used_by,
+            "maxAccounts": MAX_ACCOUNTS_PER_PROXY,
         }
 
     @app.get("/api/proxies")
@@ -694,8 +730,12 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
         if row is None:
             return JSONResponse({"error": "Proxy não encontrado."}, status_code=404)
         proxy_dict = {k: row[k] for k in ("scheme", "host", "port", "username", "password")}
+        valid_ids = {a["id"] for a in store.list_accounts()}
+        target_ids = [i for i in body.account_ids if i in valid_ids]
+        if (perr := _check_proxy_limit(proxy_dict, adding_ids=set(target_ids))):
+            return JSONResponse({"error": perr}, status_code=409)
         applied: list[int] = []
-        for acc_id in body.account_ids:
+        for acc_id in target_ids:
             if await manager.update(acc_id, {"proxy": proxy_dict}):
                 applied.append(acc_id)
         return {"ok": True, "applied": applied, "proxy": _proxy_public(row)}
