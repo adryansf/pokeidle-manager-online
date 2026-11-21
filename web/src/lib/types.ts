@@ -54,6 +54,14 @@ export interface MapInfo {
   outland: { tier: number; label: string; mult: number } | null;
 }
 
+export interface ProxyBadgeInfo {
+  name: string;
+  scheme: string;
+  host: string;
+  port: number;
+  exitIp?: string | null;
+}
+
 export interface AccountSnapshot {
   id: string;
   nick: string;
@@ -61,6 +69,7 @@ export interface AccountSnapshot {
   status: AccountStatus;
   state?: string;
   paused?: boolean;
+  proxy?: ProxyBadgeInfo | null;
   blocked?: { kind: string; detail: string } | null;
   lastReason?: string;
   vip?: boolean;

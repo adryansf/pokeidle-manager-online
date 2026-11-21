@@ -190,7 +190,23 @@ def _map_info(c: "AccountConnection", slug: str | None) -> dict | None:
     return info
 
 
-def account_snapshot(c: "AccountConnection") -> dict:
+def _proxy_snapshot(c: "AccountConnection", proxy_names: dict[tuple, str] | None = None) -> dict | None:
+    p = c.acc.proxy
+    if p is None:
+        return None
+    key = (p.scheme.lower(), p.host.strip().lower(), int(p.port), p.username or "")
+    saved_name = (proxy_names or {}).get(key) or ""
+    exit_ip = c.exit_ip if getattr(c, "exit_ip", None) and c.exit_ip != "-" else None
+    return {
+        "name": saved_name or f"{p.host}:{p.port}",
+        "scheme": p.scheme,
+        "host": p.host,
+        "port": p.port,
+        "exitIp": exit_ip,
+    }
+
+
+def account_snapshot(c: "AccountConnection", proxy_names: dict[tuple, str] | None = None) -> dict:
     from inventory import POTION_NAMES  # evita ciclo em import-time
 
     est = c.estado
@@ -207,6 +223,7 @@ def account_snapshot(c: "AccountConnection") -> dict:
         "status": _STATUS.get(c.state, "offline"),
         "state": c.state.value,  # estado detalhado, p/ debug
         "paused": bool(getattr(c, "manual_paused", False) or c.state == State.PAUSED_MANUAL),
+        "proxy": _proxy_snapshot(c, proxy_names),
         "blocked": c.block,      # {kind, detail} quando o jogo recusou a conta
         "lastReason": c.last_reason,
         "pokemon": {
@@ -255,11 +272,24 @@ def account_snapshot(c: "AccountConnection") -> dict:
     }
 
 
-def build_snapshot(conns: "list[AccountConnection]") -> dict:
+def _proxy_name_map(store) -> dict[tuple, str]:
+    if store is None or not hasattr(store, "list_proxies"):
+        return {}
+    out: dict[tuple, str] = {}
+    for row in store.list_proxies():
+        if row.get("name"):
+            key = (str(row.get("scheme") or "socks5").lower(), str(row["host"]).strip().lower(),
+                   int(row.get("port") or 0), str(row.get("username") or ""))
+            out[key] = row["name"]
+    return out
+
+
+def build_snapshot(conns: "list[AccountConnection]", store=None) -> dict:
+    pnames = _proxy_name_map(store) if store is not None else None
     return {
         "type": "snapshot",
         "ts": int(time.time() * 1000),
-        "accounts": [account_snapshot(c) for c in conns],
+        "accounts": [account_snapshot(c, pnames) for c in conns],
     }
 
 
@@ -340,7 +370,7 @@ def create_app(
     async def telemetry(request: Request, tok: str | None = Query(None, alias="token")):
         if (denied := auth.read_guard(request, tok)):
             return denied
-        return build_snapshot(get_conns())
+        return build_snapshot(get_conns(), store=store)
 
     atlas_cache: dict = {}
 
@@ -404,7 +434,7 @@ def create_app(
         await ws.accept()
         try:
             while True:
-                await ws.send_json(build_snapshot(get_conns()))
+                await ws.send_json(build_snapshot(get_conns(), store=store))
                 await asyncio.sleep(interval)
         except (WebSocketDisconnect, RuntimeError):
             pass

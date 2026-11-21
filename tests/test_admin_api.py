@@ -90,13 +90,12 @@ def test_failed_probe_does_not_save_but_skip_test_does(client):
     assert client.store.count_accounts() == 1
 
 
-def test_duplicate_and_limit(client):
+def test_duplicate_and_unlimited_accounts(client):
     assert post(client, {"text": GOOD_JSON}).json()["ok"]
     assert post(client, {"text": GOOD_JSON}).status_code == 409
-    for i in range(3):
+    for i in range(4):
         assert post(client, {"nick": f"N{i}", "token": f"tok_{i}" + "q" * 20}).json()["ok"]
-    r = post(client, {"nick": "Quinta", "token": "tok_5" + "q" * 20})
-    assert r.status_code == 409 and "Limite" in r.json()["error"]
+    assert client.store.count_accounts() == 5
 
 
 def test_patch_keeps_proxy_password_and_can_remove_proxy(client):

@@ -313,7 +313,7 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
     async def list_accounts(request: Request, tok: str | None = Query(None, alias="token")):
         if (r := guard(request, tok)):
             return r
-        return {"max": config.MAX_ACCOUNTS, "accounts": [_public(r) for r in store.list_accounts()]}
+        return {"max": config.MAX_ACCOUNTS or None, "accounts": [_public(r) for r in store.list_accounts()]}
 
     # --- login pela janela do jogo: a sessão lida fica aqui e só um código (login_id) vai ao painel
     pending_logins: dict[str, tuple[dict, float]] = {}
@@ -389,7 +389,7 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
         generated_device = not creds["device_id"]
         if generated_device:
             creds["device_id"] = new_device_id()
-        if store.count_accounts() >= config.MAX_ACCOUNTS:
+        if config.MAX_ACCOUNTS and store.count_accounts() >= config.MAX_ACCOUNTS:
             return JSONResponse({"error": f"Limite de {config.MAX_ACCOUNTS} contas atingido. "
                                           "Remova uma conta antes de adicionar outra."}, status_code=409)
         for r in store.list_accounts():

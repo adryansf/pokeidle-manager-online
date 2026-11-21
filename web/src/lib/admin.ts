@@ -184,7 +184,7 @@ export const authApi = {
 };
 
 export const admin = {
-  accounts: () => call<{ max: number; accounts: AdminAccount[] }>("GET", "/api/accounts"),
+  accounts: () => call<{ max: number | null; accounts: AdminAccount[] }>("GET", "/api/accounts"),
   loginWindowStatus: () => call<{ available: boolean }>("GET", "/api/login-window"),
   openLoginWindow: (at?: { cx: number; cy: number; dpr: number }) =>
     call<{ ok: boolean; nick: string; loginId: string }>("POST", "/api/login-window", at ?? {}),

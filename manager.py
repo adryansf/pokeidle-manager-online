@@ -102,7 +102,7 @@ class AccountManager:
 
     # ------------------------------------------------------------ operações do painel
     def add(self, data: dict) -> int:
-        if self.store.count_accounts() >= config.MAX_ACCOUNTS:
+        if config.MAX_ACCOUNTS and self.store.count_accounts() >= config.MAX_ACCOUNTS:
             raise LimitReached(f"limite de {config.MAX_ACCOUNTS} contas")
         acc_id = self.store.add_account(data)
         row = self.store.get_account(acc_id)

@@ -21,7 +21,7 @@ from urllib.parse import quote
 
 from dotenv import load_dotenv
 
-MAX_ACCOUNTS = 4
+MAX_ACCOUNTS = 0  # 0 = sem limite de contas
 DEFAULT_WS_URL = "wss://pokeidle.io"
 ALLOWED_WS_HOSTS = frozenset({"pokeidle.io", "www.pokeidle.io"})
 
@@ -239,8 +239,14 @@ def _env_account(i: int) -> dict | None:
 
 
 def load_env_accounts() -> list[dict]:
-    """Contas ACC1..ACC4 do ambiente (formato antigo), para importar no banco."""
-    return [a for i in range(1, MAX_ACCOUNTS + 1) if (a := _env_account(i))]
+    """Contas ACC1..ACCN do ambiente (formato antigo), para importar no banco."""
+    import re
+    indices = sorted({
+        int(m.group(1))
+        for k in os.environ
+        if (m := re.fullmatch(r"ACC(\d+)_TOKEN", k)) and int(m.group(1)) >= 1
+    })
+    return [a for i in indices if (a := _env_account(i))]
 
 
 def parse_close_codes() -> frozenset[int]:

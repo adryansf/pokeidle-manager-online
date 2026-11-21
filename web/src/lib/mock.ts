@@ -14,6 +14,7 @@ export function startMock(emit: (m: SnapshotMessage) => void, setState: (s: Conn
     xp: { atual: 52_000_000_000 + i * 3e9, nivel: 51_700_000_000 + i * 3e9, proximo: 52_150_000_000 + i * 3e9 },
     pass: [{ ultimo: D - 1, degrau: 6, total: 5, vipAte: 0, ciclos: 0, vipPegos: 0 }, { ultimo: D, degrau: 12, total: 40, vipAte: Date.now() + 9 * 86_400_000, ciclos: 1, vipPegos: 0b11111111111, ultimoVip: D }, { ultimo: D - 3, degrau: 3, total: 3, vipAte: 0, ciclos: 0, vipPegos: 0 }, null][i],
     map: [{ region: "outland", label: "Outland 2", outland: { tier: 2, label: "Outland 2", mult: 1.25 } }, { region: "hoenn", label: "Hoenn", outland: null }, { region: "kanto", label: "Kanto", outland: null }, { region: "outland", label: "Outland 1", outland: { tier: 1, label: "Outland 1", mult: 1 } }][i],
+    proxy: i < 3 ? { name: `ISP Brasil ${i + 1}`, scheme: "socks5", host: `185.12.34.${56 + i}`, port: 1080, exitIp: `185.12.34.${56 + i}` } : null,
     xpPerHour: 78_000_000 + i * 9_000_000,
     goldPerHour: 15_000 + i * 3_000,
     gold: 1_200_000 * (i + 1),
@@ -392,7 +393,7 @@ function installMockApi(accs: AccountSnapshot[]) {
       await wait();
       return json({ ok: true, confirmed: true, claim: { degrau: 7, premios: [{ trilha: "free", tipo: "coins", qtd: 1_000_000 }, { trilha: "free", tipo: "boost", boost: "loot", horas: 1 }] } });
     }
-    if (path === "/api/accounts" && (!init?.method || init.method === "GET")) return json({ max: 4, accounts: [] });
+    if (path === "/api/accounts" && (!init?.method || init.method === "GET")) return json({ max: null, accounts: [] });
     if (path === "/api/proxies") {
       if (init?.method === "POST") {
         const b = JSON.parse(String(init.body));

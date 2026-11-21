@@ -1214,7 +1214,7 @@ function SecurityGroup() {
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 
 export function SettingsView() {
-  const [data, setData] = useState<{ max: number; accounts: AdminAccount[] } | null>(null);
+  const [data, setData] = useState<{ max: number | null; accounts: AdminAccount[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
@@ -1235,7 +1235,7 @@ export function SettingsView() {
   }, [load]);
 
   const insecure = location.protocol === "http:" && !LOCAL_HOSTS.includes(location.hostname);
-  const full = !!data && data.accounts.length >= data.max;
+  const full = Boolean(data?.max && data.accounts.length >= data.max);
 
   return (
     <div className="space-y-5 sm:space-y-6">
@@ -1247,13 +1247,21 @@ export function SettingsView() {
 
       <Reveal as="section" index={1} className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-extrabold uppercase tracking-wide">Contas {data && <span className="tnum text-mute">({data.accounts.length}/{data.max})</span>}</h2>
+          <h2 className="text-lg font-extrabold uppercase tracking-wide">
+            Contas{" "}
+            {data && (
+              <span className="tnum text-mute">
+                ({data.accounts.length}
+                {data.max ? `/${data.max}` : ""})
+              </span>
+            )}
+          </h2>
           <button className="btn" data-active="true" onClick={() => setAdding(true)} disabled={full}>
             <Plus className="size-4" aria-hidden />
             Adicionar conta
           </button>
         </div>
-        {full && <p className="text-sm text-mute">Limite de {data?.max} contas (regra do jogo: 4 por pessoa). Remova uma para adicionar outra.</p>}
+        {full && <p className="text-sm text-mute">Limite de {data?.max} contas atingido. Remova uma para adicionar outra.</p>}
         {error && <Notice tone="error">{error}</Notice>}
         {data && data.accounts.length === 0 && (
           <div className="card p-8 text-center text-mute">Nenhuma conta ainda. Clique em <b>Adicionar conta</b> para começar.</div>

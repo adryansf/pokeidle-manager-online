@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useDragControls, type PanInfo } from "framer-motion";
-import { ChevronDown, Clock, Crosshair, Crown, MapPin, Pause, Play, Radio, Star, Swords } from "lucide-react";
+import { ChevronDown, Clock, Crosshair, Crown, Globe, MapPin, Pause, Play, Radio, Star, Swords } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ItemSprite, PokemonSprite, ShinyMark } from "@/components/Sprites";
 import { EquipPopover } from "@/components/EquipPopover";
@@ -13,7 +13,7 @@ import type { EquippedItem } from "@/lib/types";
 import { type CardStyle, useCardStyle } from "@/lib/cardStyle";
 import { dragState, justDragged } from "@/lib/useCardOrder";
 import { fmtDuration, fmtShort } from "@/lib/utils";
-import type { MapInfo } from "@/lib/types";
+import type { MapInfo, ProxyBadgeInfo } from "@/lib/types";
 
 export type CardMode = "resumo" | "sessao";
 
@@ -109,6 +109,31 @@ function MapChip({ map }: { map?: MapInfo | null }) {
       <MapPin className="size-3.5 shrink-0 sm:size-4" aria-hidden />
       <span className="truncate">{map.label}</span>
       {o && <span className="tnum font-semibold opacity-80">×{String(o.mult).replace(".", ",")}</span>}
+    </span>
+  );
+}
+
+/** Proxy vinculado à conta (mostra apelido da Central ou host:porta, e IP de saída no tooltip). */
+function ProxyChip({ proxy }: { proxy?: ProxyBadgeInfo | null }) {
+  if (!proxy) {
+    return (
+      <span
+        className="inline-flex max-w-[160px] shrink-0 items-center gap-1 rounded-md border border-line bg-void/70 px-1.5 py-1 text-[11px] font-semibold leading-none text-mute sm:px-2 sm:text-xs"
+        title="Conexão direta (sem proxy configurado — usa o IP do servidor)"
+      >
+        <Globe className="size-3 shrink-0 opacity-60 sm:size-3.5" aria-hidden />
+        <span className="truncate">Direto</span>
+      </span>
+    );
+  }
+  const detail = `Proxy: ${proxy.scheme}://${proxy.host}:${proxy.port}${proxy.exitIp ? ` · IP de saída: ${proxy.exitIp}` : ""}`;
+  return (
+    <span
+      className="inline-flex max-w-[200px] shrink-0 items-center gap-1 rounded-md border border-[#2f6b3a]/80 bg-[#16301c]/70 px-1.5 py-1 text-[11px] font-bold leading-none text-poke-green sm:px-2 sm:text-xs"
+      title={detail}
+    >
+      <Globe className="size-3 shrink-0 sm:size-3.5" aria-hidden />
+      <span className="truncate">{proxy.name}</span>
     </span>
   );
 }
@@ -538,6 +563,7 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
                 )}
               </h3>
               <MapChip map={acc.map} />
+              <ProxyChip proxy={acc.proxy} />
               <span className="flex min-w-0 items-center gap-1.5 text-sm text-mute sm:hidden">
                 <Crosshair className="size-4 shrink-0 text-poke-gold" aria-hidden />
                 <span className="sr-only">Hunt atual: </span>
