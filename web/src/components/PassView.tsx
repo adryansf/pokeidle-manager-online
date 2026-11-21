@@ -26,6 +26,7 @@ import {
   type Step,
   type Tier,
 } from "@/lib/pass";
+import { actions } from "@/lib/actions";
 import { serverNow, useAccountIds, useAccountsMap } from "@/lib/telemetry";
 import type { AccountSnapshot } from "@/lib/types";
 
@@ -417,11 +418,45 @@ export function PassView() {
               </button>
             );
           })}
-          {claimable.length > 1 && (
-            <button type="button" className="btn ml-auto border-[#6d3a85] bg-[#3a1d4a] text-[#e3b3f5]" disabled={Object.values(busy).some(Boolean)} onClick={() => void claimAll()}>
-              Resgatar em {claimable.length} contas
-            </button>
-          )}
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {acc?.automation && (
+              <button
+                type="button"
+                disabled={busy[`auto:${selected}`]}
+                onClick={async () => {
+                  const next = !acc.automation?.autoPassClaim;
+                  setBusy((b) => ({ ...b, [`auto:${selected}`]: true }));
+                  try {
+                    await actions.setAutomation(selected, { autoPassClaim: next });
+                    setMsg({
+                      ok: true,
+                      text: next
+                        ? `Auto-resgate do Passe ativado para ${acc.nick}!`
+                        : `Auto-resgate do Passe desativado para ${acc.nick}.`,
+                    });
+                  } catch (e) {
+                    setMsg({ ok: false, text: e instanceof Error ? e.message : "Erro ao alterar auto-resgate" });
+                  } finally {
+                    setBusy((b) => ({ ...b, [`auto:${selected}`]: false }));
+                  }
+                }}
+                title="Quando ligado, o bot resgata automaticamente o dia do Passe de Batalha para esta conta"
+                className={`btn text-xs font-bold ${
+                  acc.automation.autoPassClaim
+                    ? "border-[#2f6b3a] bg-[#16301c] text-poke-green hover:bg-[#1e4226]"
+                    : "border-line bg-tile text-mute hover:text-fg"
+                }`}
+              >
+                <span className={`size-2 rounded-full ${acc.automation.autoPassClaim ? "bg-poke-green" : "bg-mute"}`} aria-hidden />
+                Auto-resgatar passe
+              </button>
+            )}
+            {claimable.length > 1 && (
+              <button type="button" className="btn border-[#6d3a85] bg-[#3a1d4a] text-[#e3b3f5]" disabled={Object.values(busy).some(Boolean)} onClick={() => void claimAll()}>
+                Resgatar em {claimable.length} contas
+              </button>
+            )}
+          </div>
         </div>
       </Reveal>
 

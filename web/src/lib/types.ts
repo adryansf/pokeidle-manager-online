@@ -49,6 +49,11 @@ export interface AccountAutomation {
   autoBallRestock: boolean;
   ballThreshold: number;
   ballQty: number;
+  autoReviveRestock?: boolean;
+  reviveId?: number;
+  reviveThreshold?: number;
+  reviveQty?: number;
+  reviveStock?: Record<string, number>;
   autoPotionFallback: boolean;
   autoCenter: boolean;
   autoCenterHpPct: number;
@@ -56,7 +61,9 @@ export interface AccountAutomation {
   huntSlug?: string;
   autoBestHunt?: boolean;
   autoBestHuntRegion?: string;
+  autoPassClaim?: boolean;
   gameAutoPotion: boolean;
+  gameAutoRevive?: boolean;
   autoVoltarHunt?: boolean;
   hpLimiar?: number | null;
   hpLimiarPct?: number | null;

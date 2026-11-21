@@ -242,12 +242,17 @@ def _team_snapshot(c: "AccountConnection") -> list[dict]:
 
 
 def _automation_snapshot(c: "AccountConnection") -> dict:
+    from shop import KNOWN_REVIVE_IDS
+
     auto = c.estado.get("automation") or {}
+    items = c.estado.get("items") or {}
     raw_limiar = auto.get("hpLimiar")
     try:
         hp_limiar_pct = round(float(raw_limiar) * 100) if raw_limiar is not None else None
     except (TypeError, ValueError):
         hp_limiar_pct = None
+    auto_revive_ids = [i for i in (auto.get("reviveIds") or []) if i in KNOWN_REVIVE_IDS]
+    revive_id = c.acc.revive_id if c.acc.revive_id in KNOWN_REVIVE_IDS else (auto_revive_ids[0] if auto_revive_ids else 205)
     return {
         "autoCatch": bool(c.balls.enabled),
         "autoPotion": bool(c.acc.auto_potion),
@@ -256,6 +261,14 @@ def _automation_snapshot(c: "AccountConnection") -> dict:
         "autoBallRestock": bool(c.acc.auto_ball_restock),
         "ballThreshold": int(c.acc.ball_restock_threshold),
         "ballQty": int(c.acc.ball_restock_qty),
+        "autoReviveRestock": bool(c.acc.auto_revive_restock),
+        "reviveId": int(revive_id),
+        "reviveThreshold": int(c.acc.revive_restock_threshold),
+        "reviveQty": int(c.acc.revive_restock_qty),
+        "reviveStock": {
+            "205": int(items.get("205", 0) or 0),
+            "206": int(items.get("206", 0) or 0),
+        },
         "autoPotionFallback": bool(c.acc.auto_potion_fallback),
         "autoCenter": bool(c.acc.auto_center),
         "autoCenterHpPct": int(c.acc.auto_center_hp_pct),
@@ -263,7 +276,9 @@ def _automation_snapshot(c: "AccountConnection") -> dict:
         "huntSlug": c.acc.hunt_slug or "",
         "autoBestHunt": bool(c.acc.auto_best_hunt),
         "autoBestHuntRegion": c.acc.auto_best_hunt_region or "all",
+        "autoPassClaim": bool(c.acc.auto_pass_claim),
         "gameAutoPotion": bool(auto.get("autoPotion", True)),
+        "gameAutoRevive": bool(auto.get("autoRevive", False)),
         "autoVoltarHunt": bool(auto.get("autoVoltarHunt", False)),
         "hpLimiar": raw_limiar,
         "hpLimiarPct": hp_limiar_pct,

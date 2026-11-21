@@ -39,6 +39,8 @@ log = logging.getLogger("shop")
 
 # spec do protocolo §15.7 — nível de confirmação indicado nos comentários acima.
 KNOWN_POTION_IDS = {200, 201, 202, 203, 204, 70070}
+# Revives compráveis na loja NPC (205 = Revive, 206 = Max Revive).
+KNOWN_REVIVE_IDS = {205, 206}
 # Ordem de fallback (da mais forte para a mais simples) quando a poção equipada zera.
 POTION_FALLBACK_ORDER = (70070, 204, 203, 202, 201, 200)
 # spec do protocolo §15.4: a Beast Ball (5) não é vendida na loja NPC.
@@ -261,4 +263,17 @@ def ball_ids_resolver(estado: dict, ball_priority, ball_id):
             # Só a 1ª bola equipada na fila da automação (se for comprável na loja NPC).
             return [raw_ids[0]] if raw_ids[0] in BUYABLE_BALL_IDS else []
         return [i for i in ball_priority if i in BUYABLE_BALL_IDS][:1]
+    return resolve
+
+
+def revive_ids_resolver(estado: dict, revive_id):
+    """Resolve qual Revive (205 Revive ou 206 Max Revive) repor automaticamente (sempre só 1)."""
+    def resolve() -> list[int]:
+        rid = _live(revive_id)
+        if rid is not None:
+            return [rid] if rid in KNOWN_REVIVE_IDS else []
+        auto_ids = [i for i in (estado.get("automation") or {}).get("reviveIds", []) if i in KNOWN_REVIVE_IDS]
+        if auto_ids:
+            return auto_ids[:1]
+        return [205]
     return resolve

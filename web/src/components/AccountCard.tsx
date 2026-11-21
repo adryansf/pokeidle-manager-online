@@ -812,7 +812,7 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
         </AnimatePresence>
       </div>
 
-      {/* Equipe completa (clicável para abrir Ficha Completa do Pokémon) */}
+      {/* Equipe completa (clicável para abrir Ficha Completa; botão ★ Ativar troca o Pokémon ativo da equipe) */}
       {acc.team && acc.team.length > 0 && (
         <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5">
           <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-mute">Equipe</span>
@@ -820,34 +820,56 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
             const mpct = m.maxHp > 0 ? Math.max(0, Math.min(100, (m.hp / m.maxHp) * 100)) : 0;
             const mcol = mpct > 50 ? "#6fd47c" : mpct > 20 ? "#f3c04a" : "#ef6b5b";
             return (
-              <button
+              <div
                 key={m.id ?? idx}
-                type="button"
-                disabled={!m.id}
-                title={`${m.name} Nv.${m.level} · HP ${fmtShort(m.hp)}/${fmtShort(m.maxHp)} (${Math.round(mpct)}%) — clique para abrir a ficha`}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!justDragged() && m.id) openSheet({ kind: "own", account: accountNumber(id), id: m.id }, e.currentTarget);
-                }}
-                className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-1.5 py-1 text-left transition-colors hover:border-edge disabled:cursor-default ${
-                  m.active ? "border-poke-gold/70 bg-[#2a1f0b]/80" : "border-line bg-void/60"
+                className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-1.5 py-1 transition-colors ${
+                  m.active ? "border-poke-gold/70 bg-[#2a1f0b]/80" : "border-line bg-void/60 hover:border-edge"
                 }`}
               >
-                <PokemonSprite looktype={m.looktype} species={m.speciesId} size={24} shiny={m.shiny} />
-                <div className="min-w-0 leading-tight">
-                  <div className="flex items-center gap-0.5 text-[11px] font-bold">
-                    <span className="max-w-[78px] truncate">{m.name}</span>
-                    {m.shiny && <ShinyMark className="text-[10px]" />}
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-1">
-                    <div className="h-1 w-10 overflow-hidden rounded-full bg-black/60">
-                      <div className="h-full rounded-full" style={{ width: `${mpct}%`, backgroundColor: mcol }} />
+                <button
+                  type="button"
+                  disabled={!m.id}
+                  title={`${m.name} Nv.${m.level} · HP ${fmtShort(m.hp)}/${fmtShort(m.maxHp)} (${Math.round(mpct)}%) — clique para abrir a ficha`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!justDragged() && m.id) openSheet({ kind: "own", account: accountNumber(id), id: m.id }, e.currentTarget);
+                  }}
+                  className="inline-flex items-center gap-1.5 text-left disabled:cursor-default"
+                >
+                  <PokemonSprite looktype={m.looktype} species={m.speciesId} size={24} shiny={m.shiny} />
+                  <div className="min-w-0 leading-tight">
+                    <div className="flex items-center gap-0.5 text-[11px] font-bold">
+                      <span className="max-w-[78px] truncate">{m.name}</span>
+                      {m.shiny && <ShinyMark className="text-[10px]" />}
                     </div>
-                    <span className="tnum text-[9px] text-mute">Nv.{fmtShort(m.level)}</span>
+                    <div className="mt-0.5 flex items-center gap-1">
+                      <div className="h-1 w-10 overflow-hidden rounded-full bg-black/60">
+                        <div className="h-full rounded-full" style={{ width: `${mpct}%`, backgroundColor: mcol }} />
+                      </div>
+                      <span className="tnum text-[9px] text-mute">Nv.{fmtShort(m.level)}</span>
+                    </div>
                   </div>
-                </div>
-              </button>
+                </button>
+                {!m.active && m.id && acc.status === "online" && (
+                  <button
+                    type="button"
+                    disabled={autoBusy === `active:${m.id}`}
+                    title={`Tornar ${m.name} o Pokémon ativo da equipe`}
+                    aria-label={`Ativar ${m.name}`}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (justDragged() || autoBusy) return;
+                      setAutoBusy(`active:${m.id}`);
+                      void actions.setActivePokemon(id, m.id!).finally(() => setAutoBusy(null));
+                    }}
+                    className="ml-0.5 rounded border border-line bg-tile px-1 py-0.5 text-[9px] font-extrabold uppercase text-mute transition-colors hover:border-poke-gold hover:text-poke-gold disabled:opacity-50"
+                  >
+                    Ativar
+                  </button>
+                )}
+              </div>
             );
           })}
         </div>
@@ -867,6 +889,13 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
                 `Cura automática do jogo (usa a poção equipada quando HP ≤ ${acc.automation.hpLimiarPct ?? 40}%). Abra Detalhes → Automação para ajustar a %.`,
               ],
               [
+                "gameAutoRevive",
+                "Revive",
+                Boolean(acc.automation.gameAutoRevive),
+                { gameAutoRevive: !acc.automation.gameAutoRevive },
+                "Usar Revive automaticamente ao desmaiar (configuração nativa do jogo)",
+              ],
+              [
                 "autoPotion",
                 acc.automation.autoPotion
                   ? `Auto-Poção (<${acc.automation.potionThreshold}→+${acc.automation.potionQty})`
@@ -884,15 +913,25 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
                 { autoBallRestock: !acc.automation.autoBallRestock },
                 `Autocompra de Pokébolas: compra ${acc.automation.ballQty} un. quando estoque ficar abaixo de ${acc.automation.ballThreshold}${acc.automation.goldReserve > 0 ? ` (piso ${fmtShort(acc.automation.goldReserve)}g)` : ""}.`,
               ],
+              [
+                "autoReviveRestock",
+                acc.automation.autoReviveRestock
+                  ? `Auto-Revive (<${acc.automation.reviveThreshold ?? 5}→+${acc.automation.reviveQty ?? 20})`
+                  : "Auto-Revive",
+                Boolean(acc.automation.autoReviveRestock),
+                { autoReviveRestock: !acc.automation.autoReviveRestock },
+                `Autocompra de ${acc.automation.reviveId === 206 ? "Max Revive" : "Revive"}: compra ${acc.automation.reviveQty ?? 20} un. quando estoque ficar abaixo de ${acc.automation.reviveThreshold ?? 5}.`,
+              ],
               ["autoPotionFallback", "Fallback", acc.automation.autoPotionFallback, { autoPotionFallback: !acc.automation.autoPotionFallback }, "Trocar para próxima poção disponível se zerar"],
               ["autoCenter", `Centro ≤${acc.automation.autoCenterHpPct}%`, acc.automation.autoCenter, { autoCenter: !acc.automation.autoCenter }, "Auto-Centro Pokémon de emergência sem poções"],
               ["autoBestHunt", acc.automation.autoBestHunt ? `Auto-Hunt (${acc.automation.autoBestHuntRegion || "all"})` : "Auto-Hunt", Boolean(acc.automation.autoBestHunt), { autoBestHunt: !acc.automation.autoBestHunt }, "Trocar automaticamente para a melhor hunt liberada ao subir de nível"],
+              ["autoPassClaim", "Auto-Passe", Boolean(acc.automation.autoPassClaim), { autoPassClaim: !acc.automation.autoPassClaim }, "Resgatar automaticamente o Passe de Batalha quando disponível"],
             ] as [string, string, boolean, AutomationPatch, string][]
           ).map(([key, label, on, patch, tip]) => (
             <button
               key={key}
               type="button"
-              disabled={autoBusy === key || (key === "gameAutoPotion" && acc.status !== "online")}
+              disabled={autoBusy === key || ((key === "gameAutoPotion" || key === "gameAutoRevive") && acc.status !== "online")}
               title={`${tip} — clique para ${on ? "desativar" : "ativar"}`}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {

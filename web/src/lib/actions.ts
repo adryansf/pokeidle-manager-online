@@ -181,6 +181,10 @@ export type AutomationPatch = Partial<{
   autoBallRestock: boolean;
   ballThreshold: number;
   ballQty: number;
+  autoReviveRestock: boolean;
+  reviveId: number;
+  reviveThreshold: number;
+  reviveQty: number;
   autoPotionFallback: boolean;
   autoCenter: boolean;
   autoCenterHpPct: number;
@@ -188,7 +192,9 @@ export type AutomationPatch = Partial<{
   huntSlug: string;
   autoBestHunt: boolean;
   autoBestHuntRegion: string;
+  autoPassClaim: boolean;
   gameAutoPotion: boolean;
+  gameAutoRevive: boolean;
   autoVoltarHunt: boolean;
   hpLimiarPct: number;
   pvpAuto: boolean;
@@ -197,6 +203,12 @@ export type AutomationPatch = Partial<{
 export const actions = {
   equip: (accId: string, kind: "ball" | "potion", id: number) =>
     call<EquipResult>("POST", `/api/accounts/${numId(accId)}/equip`, { kind, id }),
+  setActivePokemon: (accId: string, pokemonId: number) =>
+    call<{ ok: boolean; confirmed: boolean; pokemonId: number }>(
+      "POST",
+      `/api/accounts/${numId(accId)}/team/active`,
+      { pokemonId },
+    ),
   selectHunt: (accId: string, slug: string) => call<HuntResult>("POST", `/api/accounts/${numId(accId)}/hunt`, { slug }),
   selectOutlandTier: (accId: string, tier: number) =>
     call<{ ok: boolean; confirmed: boolean; tier: number }>("POST", `/api/accounts/${numId(accId)}/outland-tier`, { tier }),

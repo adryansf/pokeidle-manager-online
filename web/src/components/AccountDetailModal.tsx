@@ -90,35 +90,49 @@ function ToggleRow({
 
 function TeamCard({
   mon,
+  online,
+  activating,
+  onActivate,
   onOpenSheet,
 }: {
   mon: TeamPokemon;
+  online: boolean;
+  activating?: boolean;
+  onActivate?: (id: number) => void;
   onOpenSheet: (id: number, el: Element) => void;
 }) {
   const pct = mon.maxHp > 0 ? Math.max(0, Math.min(100, (mon.hp / mon.maxHp) * 100)) : 0;
   return (
-    <button
-      type="button"
-      disabled={!mon.id}
-      onClick={(e) => mon.id && onOpenSheet(mon.id, e.currentTarget)}
-      className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors hover:border-edge disabled:cursor-default ${
-        mon.active ? "border-poke-gold/70 bg-[#2a1f0b]/60" : "border-line bg-tile"
+    <div
+      className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors ${
+        mon.active ? "border-poke-gold/70 bg-[#2a1f0b]/60" : "border-line bg-tile hover:border-edge"
       }`}
     >
-      <div className="relative flex size-14 shrink-0 items-center justify-center rounded-xl border border-line bg-void">
+      <button
+        type="button"
+        disabled={!mon.id}
+        onClick={(e) => mon.id && onOpenSheet(mon.id, e.currentTarget)}
+        className="relative flex size-14 shrink-0 items-center justify-center rounded-xl border border-line bg-void disabled:cursor-default"
+        title="Ver ficha completa"
+      >
         <PokemonSprite looktype={mon.looktype} species={mon.speciesId} size={48} shiny={mon.shiny} />
         {mon.active && (
           <span className="absolute -bottom-1 rounded bg-poke-gold px-1 py-0.5 text-[9px] font-black uppercase leading-none text-void">
             Ativo
           </span>
         )}
-      </div>
+      </button>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-1 font-extrabold">
+          <button
+            type="button"
+            disabled={!mon.id}
+            onClick={(e) => mon.id && onOpenSheet(mon.id, e.currentTarget)}
+            className="flex min-w-0 items-center gap-1 font-extrabold hover:text-poke-gold disabled:cursor-default"
+          >
             <span className="truncate text-sm sm:text-base">{mon.name}</span>
             {mon.shiny && <ShinyMark />}
-          </div>
+          </button>
           <span className="tnum shrink-0 text-xs font-bold text-poke-gold">Nv. {fmtShort(mon.level)}</span>
         </div>
         <div className="mt-1.5 flex items-center gap-2">
@@ -129,7 +143,7 @@ function TeamCard({
             {fmtShort(mon.hp)}/{fmtShort(mon.maxHp)} HP ({Math.round(pct)}%)
           </span>
         </div>
-        <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] text-mute">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-mute">
           {mon.grade != null && (
             <span>
               Nota <b className="tnum text-fg">{mon.grade.toFixed(2)}</b>
@@ -145,10 +159,31 @@ function TeamCard({
               P<b className="tnum text-poke-gold">{mon.potency}</b>
             </span>
           )}
-          <span className="ml-auto font-semibold text-poke-gold/90">Ver ficha →</span>
+          <div className="ml-auto flex items-center gap-1.5">
+            {!mon.active && mon.id && onActivate && (
+              <button
+                type="button"
+                disabled={!online || activating}
+                onClick={() => onActivate(mon.id!)}
+                title={online ? `Deixar ${mon.name} como Pokémon ativo` : "A conta precisa estar online"}
+                className="rounded border border-poke-gold/70 bg-[#33260e] px-2 py-0.5 text-[11px] font-bold text-poke-gold hover:bg-[#463413] disabled:opacity-50"
+              >
+                {activating ? "Ativando…" : "★ Deixar ativo"}
+              </button>
+            )}
+            {mon.id && (
+              <button
+                type="button"
+                onClick={(e) => onOpenSheet(mon.id!, e.currentTarget)}
+                className="font-semibold text-poke-gold/90 hover:underline"
+              >
+                Ficha →
+              </button>
+            )}
+          </div>
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -206,6 +241,9 @@ export function AccountDetailModal({
     potionQty: string;
     ballThreshold: string;
     ballQty: string;
+    reviveId: string;
+    reviveThreshold: string;
+    reviveQty: string;
     goldReserve: string;
     autoCenterHpPct: string;
     huntSlug: string;
@@ -216,6 +254,9 @@ export function AccountDetailModal({
     potionQty: "100",
     ballThreshold: "10",
     ballQty: "100",
+    reviveId: "205",
+    reviveThreshold: "5",
+    reviveQty: "20",
     goldReserve: "0",
     autoCenterHpPct: "20",
     huntSlug: "",
@@ -231,6 +272,9 @@ export function AccountDetailModal({
       potionQty: String(a.potionQty ?? 100),
       ballThreshold: String(a.ballThreshold ?? 10),
       ballQty: String(a.ballQty ?? 100),
+      reviveId: String(a.reviveId ?? 205),
+      reviveThreshold: String(a.reviveThreshold ?? 5),
+      reviveQty: String(a.reviveQty ?? 20),
       goldReserve: String(a.goldReserve ?? 0),
       autoCenterHpPct: String(a.autoCenterHpPct ?? 20),
       huntSlug: a.huntSlug ?? "",
@@ -259,6 +303,22 @@ export function AccountDetailModal({
 
   const openMonSheet = (monId: number, el: Element) => {
     openSheet({ kind: "own", account: accNum, id: monId }, el);
+  };
+
+  const activateMon = async (monId: number) => {
+    setBusyKey(`active:${monId}`);
+    setMsg(null);
+    try {
+      const r = await actions.setActivePokemon(accId, monId);
+      setMsg({
+        tone: "ok",
+        text: r.confirmed ? "Pokémon ativo trocado com sucesso!" : "Pedido de troca enviado ao jogo.",
+      });
+    } catch (e) {
+      setMsg({ tone: "error", text: e instanceof Error ? e.message : "Não foi possível ativar esse Pokémon" });
+    } finally {
+      setBusyKey(null);
+    }
   };
 
   const toggleAuto = async (key: string, patch: AutomationPatch) => {
@@ -564,7 +624,14 @@ export function AccountDetailModal({
                     {team.length > 0 ? (
                       <div className="grid gap-2.5 sm:grid-cols-2">
                         {team.map((m, idx) => (
-                          <TeamCard key={m.id ?? idx} mon={m} onOpenSheet={openMonSheet} />
+                          <TeamCard
+                            key={m.id ?? idx}
+                            mon={m}
+                            online={acc.status === "online"}
+                            activating={busyKey === `active:${m.id}`}
+                            onActivate={activateMon}
+                            onOpenSheet={openMonSheet}
+                          />
                         ))}
                       </div>
                     ) : (
@@ -605,6 +672,27 @@ export function AccountDetailModal({
                           checked={auto.gameAutoPotion}
                           disabled={busyKey === "gameAutoPotion" || acc.status !== "online"}
                           onToggle={() => void toggleAuto("gameAutoPotion", { gameAutoPotion: !auto.gameAutoPotion })}
+                        />
+                        <ToggleRow
+                          label="Usar Revive ao desmaiar (jogo)"
+                          desc="Ativa/desativa o uso automático de Revive quando o Pokémon desmaiar."
+                          checked={Boolean(auto.gameAutoRevive)}
+                          disabled={busyKey === "gameAutoRevive" || acc.status !== "online"}
+                          onToggle={() => void toggleAuto("gameAutoRevive", { gameAutoRevive: !auto.gameAutoRevive })}
+                        />
+                        <ToggleRow
+                          label={`Autocompra de Revive (< ${auto.reviveThreshold ?? 5} → +${auto.reviveQty ?? 20})`}
+                          desc={`Compra ${auto.reviveQty ?? 20}× ${auto.reviveId === 206 ? "Max Revive" : "Revive"} quando o estoque ficar abaixo de ${auto.reviveThreshold ?? 5}${auto.goldReserve > 0 ? ` · piso ${fmtShort(auto.goldReserve)}g` : ""}.`}
+                          checked={Boolean(auto.autoReviveRestock)}
+                          disabled={busyKey === "autoReviveRestock"}
+                          onToggle={() => void toggleAuto("autoReviveRestock", { autoReviveRestock: !auto.autoReviveRestock })}
+                        />
+                        <ToggleRow
+                          label="Resgate automático do Passe de Batalha"
+                          desc="Resgata automaticamente os prêmios diários do Passe de Batalha assim que virar o dia."
+                          checked={Boolean(auto.autoPassClaim)}
+                          disabled={busyKey === "autoPassClaim"}
+                          onToggle={() => void toggleAuto("autoPassClaim", { autoPassClaim: !auto.autoPassClaim })}
                         />
                         <ToggleRow
                           label="Voltar automático à hunt (jogo)"
@@ -881,6 +969,35 @@ export function AccountDetailModal({
                               onChange={(e) => setAutoDraft({ ...autoDraft, goldReserve: e.target.value.replace(/\D/g, "") })}
                             />
                           </label>
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-bold text-mute">Revive p/ usar & comprar</span>
+                            <select
+                              className="field w-full text-sm"
+                              value={autoDraft.reviveId}
+                              onChange={(e) => setAutoDraft({ ...autoDraft, reviveId: e.target.value })}
+                            >
+                              <option value="205">Revive (×{fmtShort(auto.reviveStock?.["205"] ?? 0)})</option>
+                              <option value="206">Max Revive (×{fmtShort(auto.reviveStock?.["206"] ?? 0)})</option>
+                            </select>
+                          </label>
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-bold text-mute">Revive: repor abaixo de</span>
+                            <input
+                              className="field w-full text-sm"
+                              inputMode="numeric"
+                              value={autoDraft.reviveThreshold}
+                              onChange={(e) => setAutoDraft({ ...autoDraft, reviveThreshold: e.target.value.replace(/\D/g, "") })}
+                            />
+                          </label>
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-bold text-mute">Revive: comprar qtd</span>
+                            <input
+                              className="field w-full text-sm"
+                              inputMode="numeric"
+                              value={autoDraft.reviveQty}
+                              onChange={(e) => setAutoDraft({ ...autoDraft, reviveQty: e.target.value.replace(/\D/g, "") })}
+                            />
+                          </label>
                         </div>
 
                         <div className="flex justify-end">
@@ -896,6 +1013,9 @@ export function AccountDetailModal({
                                   potionQty: Math.max(1, Number(autoDraft.potionQty || 100)),
                                   ballThreshold: Number(autoDraft.ballThreshold || 10),
                                   ballQty: Math.max(1, Number(autoDraft.ballQty || 100)),
+                                  reviveId: Number(autoDraft.reviveId || 205),
+                                  reviveThreshold: Number(autoDraft.reviveThreshold || 5),
+                                  reviveQty: Math.max(1, Number(autoDraft.reviveQty || 20)),
                                   goldReserve: Number(autoDraft.goldReserve || 0),
                                   autoCenterHpPct: Math.min(80, Math.max(5, Number(autoDraft.autoCenterHpPct || 20))),
                                   ...(acc.status === "online"

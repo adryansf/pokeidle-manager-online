@@ -69,6 +69,8 @@ DEFAULT_POTION_RESTOCK_THRESHOLD = 10
 DEFAULT_POTION_RESTOCK_QTY = 100
 DEFAULT_BALL_RESTOCK_THRESHOLD = 10
 DEFAULT_BALL_RESTOCK_QTY = 100
+DEFAULT_REVIVE_RESTOCK_THRESHOLD = 5
+DEFAULT_REVIVE_RESTOCK_QTY = 20
 POTION_CHECK_INTERVAL_S = 5   # intervalo do check de reposição (Potion e Ball)
 
 VALID_SCHEMES = {"http", "https", "socks5", "socks5h", "socks4"}
@@ -117,12 +119,17 @@ class AccountConfig:
     ball_id: int | None = None       # qual Ball repor; None = automation.ballIds do jogo
     ball_restock_threshold: int = DEFAULT_BALL_RESTOCK_THRESHOLD
     ball_restock_qty: int = DEFAULT_BALL_RESTOCK_QTY
-    gold_reserve: int = 0            # piso de ouro: não compra poção/bola se o gold estiver <= este valor
+    auto_revive_restock: bool = False  # reposição automática de Revive (desativada por padrão)
+    revive_id: int | None = None     # 205 (Revive) ou 206 (Max Revive); None = automation.reviveIds[0] ou 205
+    revive_restock_threshold: int = DEFAULT_REVIVE_RESTOCK_THRESHOLD
+    revive_restock_qty: int = DEFAULT_REVIVE_RESTOCK_QTY
+    gold_reserve: int = 0            # piso de ouro: não compra poção/bola/revive se o gold estiver <= este valor
     auto_potion_fallback: bool = True  # se a poção equipada zerar, troca para a próxima disponível na mochila
     auto_center: bool = True         # emergência: HP baixo sem poções -> vai ao Centro Pokémon
     auto_center_hp_pct: int = 20     # limiar de HP (%) para acionar o Auto-Centro de emergência
     auto_best_hunt: bool = False     # troca automaticamente para a melhor hunt liberada ao subir de nível
     auto_best_hunt_region: str = "all"  # filtro de região para auto_best_hunt ("all", "kanto", "outland", ...)
+    auto_pass_claim: bool = False    # resgata automaticamente o Passe de Batalha quando disponível
     pvp_auto: bool = False           # entra sozinho na fila do PVP ranqueado
 
     @property
@@ -150,12 +157,17 @@ OPTION_DEFAULTS: dict = {
     "ball_id": None,
     "ball_restock_threshold": DEFAULT_BALL_RESTOCK_THRESHOLD,
     "ball_restock_qty": DEFAULT_BALL_RESTOCK_QTY,
+    "auto_revive_restock": False,
+    "revive_id": None,
+    "revive_restock_threshold": DEFAULT_REVIVE_RESTOCK_THRESHOLD,
+    "revive_restock_qty": DEFAULT_REVIVE_RESTOCK_QTY,
     "gold_reserve": 0,
     "auto_potion_fallback": True,
     "auto_center": True,
     "auto_center_hp_pct": 20,
     "auto_best_hunt": False,
     "auto_best_hunt_region": "all",
+    "auto_pass_claim": False,
     "pvp_auto": False,
 }
 
@@ -187,12 +199,17 @@ def build_account_config(d: dict) -> AccountConfig:
         ball_id=int(o["ball_id"]) if o["ball_id"] not in (None, "") else None,
         ball_restock_threshold=int(o["ball_restock_threshold"]),
         ball_restock_qty=int(o["ball_restock_qty"]),
+        auto_revive_restock=bool(o.get("auto_revive_restock", False)),
+        revive_id=int(o["revive_id"]) if o.get("revive_id") not in (None, "") else None,
+        revive_restock_threshold=int(o.get("revive_restock_threshold", DEFAULT_REVIVE_RESTOCK_THRESHOLD)),
+        revive_restock_qty=int(o.get("revive_restock_qty", DEFAULT_REVIVE_RESTOCK_QTY)),
         gold_reserve=max(0, int(o.get("gold_reserve") or 0)),
         auto_potion_fallback=bool(o.get("auto_potion_fallback", True)),
         auto_center=bool(o.get("auto_center", True)),
         auto_center_hp_pct=min(max(int(o.get("auto_center_hp_pct") or 20), 5), 80),
         auto_best_hunt=bool(o.get("auto_best_hunt", False)),
         auto_best_hunt_region=str(o.get("auto_best_hunt_region") or "all").strip().lower() or "all",
+        auto_pass_claim=bool(o.get("auto_pass_claim", False)),
         pvp_auto=bool(o["pvp_auto"]),
     )
 

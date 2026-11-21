@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from auth import Auth
 from connection import AccountConnection, State
 from game_data import BALL_NAMES
-from shop import BUYABLE_BALL_IDS, KNOWN_POTION_IDS
+from shop import BUYABLE_BALL_IDS, KNOWN_POTION_IDS, KNOWN_REVIVE_IDS
 from store import Store
 
 if TYPE_CHECKING:
@@ -68,6 +68,10 @@ class BulkHuntIn(BaseModel):
     slug: str
 
 
+class ActivePokemonIn(BaseModel):
+    pokemonId: int
+
+
 class AutomationPatchIn(BaseModel):
     autoCatch: bool | None = None
     autoPotion: bool | None = None
@@ -76,6 +80,10 @@ class AutomationPatchIn(BaseModel):
     autoBallRestock: bool | None = None
     ballThreshold: int | None = None
     ballQty: int | None = None
+    autoReviveRestock: bool | None = None
+    reviveId: int | None = None
+    reviveThreshold: int | None = None
+    reviveQty: int | None = None
     autoPotionFallback: bool | None = None
     autoCenter: bool | None = None
     autoCenterHpPct: int | None = None
@@ -83,7 +91,9 @@ class AutomationPatchIn(BaseModel):
     huntSlug: str | None = None
     autoBestHunt: bool | None = None
     autoBestHuntRegion: str | None = None
+    autoPassClaim: bool | None = None
     gameAutoPotion: bool | None = None
+    gameAutoRevive: bool | None = None
     autoVoltarHunt: bool | None = None
     hpLimiarPct: int | None = None
     pvpAuto: bool | None = None
@@ -574,6 +584,30 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
         conn.hunt._push_live_event("center", name=conn.acc.nick, manual=True)
         return {"ok": True}
 
+    @app.post("/api/accounts/{acc_id}/team/active")
+    async def set_active_pokemon(acc_id: int, body: ActivePokemonIn, request: Request,
+                                 tok: str | None = Query(None, alias="token")):
+        """Troca qual Pokémon da equipe da conta fica ativo (`team.active`)."""
+        if (r := guard(request, tok)):
+            return r
+        conn = conn_of(acc_id)
+        if conn is None:
+            return JSONResponse({"error": "conta não encontrada ou desligada"}, status_code=404)
+        if not conn.can_send:
+            return JSONResponse({"error": "A conta está offline."}, status_code=409)
+        pks = conn.estado.get("pokemons") or []
+        target = next((p for p in pks if isinstance(p, dict) and p.get("id") == body.pokemonId), None)
+        if target is None:
+            return JSONResponse({"error": "Pokémon não encontrado nesta conta."}, status_code=404)
+        if target.get("slot") is None and conn.estado.get("activeId") != body.pokemonId:
+            return JSONResponse({"error": "Esse Pokémon não está na equipe ativa."}, status_code=400)
+        await conn.set_active_pokemon(body.pokemonId)
+        for _ in range(10):
+            await asyncio.sleep(0.2)
+            if conn.estado.get("activeId") == body.pokemonId:
+                return {"ok": True, "confirmed": True, "pokemonId": body.pokemonId}
+        return {"ok": True, "confirmed": False, "pokemonId": body.pokemonId}
+
     @app.post("/api/accounts/{acc_id}/automation")
     async def toggle_automation(acc_id: int, body: AutomationPatchIn, request: Request,
                                 tok: str | None = Query(None, alias="token")):
@@ -605,6 +639,19 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
         if "ballQty" in sent and body.ballQty is not None:
             v = min(max(int(body.ballQty), 1), 100000)
             opts["ball_restock_qty"] = acc_changes["ball_restock_qty"] = v
+        if "autoReviveRestock" in sent and body.autoReviveRestock is not None:
+            opts["auto_revive_restock"] = acc_changes["auto_revive_restock"] = bool(body.autoReviveRestock)
+        if "reviveId" in sent and body.reviveId is not None:
+            rid = int(body.reviveId)
+            if rid not in KNOWN_REVIVE_IDS:
+                return JSONResponse({"error": "ID de Revive inválido (use 205 Revive ou 206 Max Revive)."}, status_code=400)
+            opts["revive_id"] = acc_changes["revive_id"] = rid
+        if "reviveThreshold" in sent and body.reviveThreshold is not None:
+            v = min(max(int(body.reviveThreshold), 0), 100000)
+            opts["revive_restock_threshold"] = acc_changes["revive_restock_threshold"] = v
+        if "reviveQty" in sent and body.reviveQty is not None:
+            v = min(max(int(body.reviveQty), 1), 100000)
+            opts["revive_restock_qty"] = acc_changes["revive_restock_qty"] = v
         if "autoPotionFallback" in sent and body.autoPotionFallback is not None:
             opts["auto_potion_fallback"] = acc_changes["auto_potion_fallback"] = bool(body.autoPotionFallback)
         if "autoCenter" in sent and body.autoCenter is not None:
@@ -636,19 +683,30 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
             reg = (body.autoBestHuntRegion or "all").strip().lower() or "all"
             opts["auto_best_hunt_region"] = acc_changes["auto_best_hunt_region"] = reg
             conn._last_auto_hunt_at = 0.0
+        if "autoPassClaim" in sent and body.autoPassClaim is not None:
+            opts["auto_pass_claim"] = acc_changes["auto_pass_claim"] = bool(body.autoPassClaim)
+            if body.autoPassClaim:
+                conn._last_pass_claim_at = 0.0
         if "pvpAuto" in sent and body.pvpAuto is not None:
             opts["pvp_auto"] = acc_changes["pvp_auto"] = bool(body.pvpAuto)
             conn.pvp.auto = bool(body.pvpAuto)
         if acc_changes:
             conn.acc = replace(conn.acc, **acc_changes)
-            restock_keys = {"auto_potion", "potion_restock_threshold", "potion_restock_qty",
-                            "auto_ball_restock", "ball_restock_threshold", "ball_restock_qty"}
+            restock_keys = {
+                "auto_potion", "potion_restock_threshold", "potion_restock_qty",
+                "auto_ball_restock", "ball_restock_threshold", "ball_restock_qty",
+                "auto_revive_restock", "revive_id", "revive_restock_threshold", "revive_restock_qty",
+            }
             if restock_keys & acc_changes.keys():
                 conn.rebuild_restockers()
             store.update_account(acc_id, {"options": opts})
         game_patch: dict = {}
         if "gameAutoPotion" in sent and body.gameAutoPotion is not None:
             game_patch["autoPotion"] = bool(body.gameAutoPotion)
+        if "gameAutoRevive" in sent and body.gameAutoRevive is not None:
+            game_patch["autoRevive"] = bool(body.gameAutoRevive)
+        if "reviveId" in sent and body.reviveId is not None and conn.can_send:
+            game_patch["reviveIds"] = [int(body.reviveId)]
         if "autoVoltarHunt" in sent and body.autoVoltarHunt is not None:
             game_patch["autoVoltarHunt"] = bool(body.autoVoltarHunt)
         if "hpLimiarPct" in sent and body.hpLimiarPct is not None:

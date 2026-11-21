@@ -37,7 +37,10 @@ from pvp import PvpManager
 from notify import GOLD, GREEN, RED, DailyStats, Notifier, fmt_duration, rare_icon_url
 from item_labels import item_name
 from session_stats import ITEM_LABELS, TRACKED, SessionItems, SessionStore, ShinyTracker
-from shop import AutoRestock, KNOWN_POTION_IDS, POTION_FALLBACK_ORDER, ShopManager, ball_ids_resolver, potion_ids_resolver
+from shop import (
+    AutoRestock, KNOWN_POTION_IDS, POTION_FALLBACK_ORDER, ShopManager,
+    ball_ids_resolver, potion_ids_resolver, revive_ids_resolver,
+)
 
 log = logging.getLogger("conn")
 
@@ -248,6 +251,8 @@ class AccountConnection:
         self._last_potion_fallback_at: float = 0.0
         self._last_auto_center_at: float = 0.0
         self._last_auto_hunt_at: float = 0.0
+        self._last_pass_claim_at: float = 0.0
+        self._auto_pass_claiming: bool = False
         self._center_return_slug: str | None = None
         self.restockers: list[AutoRestock] = []
         self.rebuild_restockers()
@@ -269,6 +274,12 @@ class AccountConnection:
                 self.acc.name, self.estado, self.shop, kind="ball",
                 get_ids=ball_ids_resolver(self.estado, self.acc.ball_priority, lambda: self.acc.ball_id),
                 threshold=self.acc.ball_restock_threshold, qty=self.acc.ball_restock_qty,
+                gold_reserve=lambda: self.acc.gold_reserve))
+        if self.acc.auto_revive_restock:
+            self.restockers.append(AutoRestock(
+                self.acc.name, self.estado, self.shop, kind="item",
+                get_ids=revive_ids_resolver(self.estado, lambda: self.acc.revive_id),
+                threshold=self.acc.revive_restock_threshold, qty=self.acc.revive_restock_qty,
                 gold_reserve=lambda: self.acc.gold_reserve))
 
     # ------------------------------------------------------------------ logs
@@ -428,7 +439,12 @@ class AccountConnection:
                 self.pvp.bind(ws)
                 if self.farm_paused:
                     self._farm_pause_pending_center = True
-                elif self.acc.hunt_slug and self.acc.hunt_slug != self.estado.get("huntSlug"):
+                elif self.acc.auto_best_hunt:
+                    best = self._pick_best_hunt_for_level()
+                    if best and (self.is_in_center() or best["slug"] != self.estado.get("huntSlug")):
+                        await self.hunt.select_hunt(best["slug"])
+                        self._last_auto_hunt_at = time.monotonic()
+                elif self.acc.hunt_slug and (self.is_in_center() or self.acc.hunt_slug != self.estado.get("huntSlug")):
                     await self.hunt.select_hunt(self.acc.hunt_slug)
                 if self.on_online:
                     try:
@@ -554,6 +570,14 @@ class AccountConnection:
             self.pass_claim = {"degrau": r.get("degrau"), "premios": r.get("premios") or []}
             self.pass_claim_seq += 1
             log.info("[%s] passe resgatado: dia %s", self.acc.name, r.get("degrau"))
+            if self._auto_pass_claiming:
+                self._auto_pass_claiming = False
+                if self.notifier:
+                    self.notifier.send(
+                        self.acc.nick,
+                        f"🎫 **Passe de Batalha:** dia **{r.get('degrau')}** resgatado automaticamente!",
+                        GREEN,
+                    )
 
     def server_now_ms(self) -> int:
         return self.market.server_now_ms()
@@ -727,6 +751,7 @@ class AccountConnection:
                 await self._check_potion_fallback()
                 await self._check_auto_center()
                 await self._check_auto_hunt()
+                await self._check_auto_pass()
             except Exception as e:  # noqa: BLE001
                 log.debug("[%s] safety_loop erro ignorado: %r", self.acc.name, e)
 
@@ -824,7 +849,14 @@ class AccountConnection:
                 except Exception:  # noqa: BLE001
                     pass
             self._saved_auto_voltar_hunt = None
-            target = self._farm_resume_slug or self.acc.hunt_slug
+            self._last_auto_hunt_at = 0.0
+            target: str | None = None
+            if self.acc.auto_best_hunt:
+                best = self._pick_best_hunt_for_level()
+                if best:
+                    target = best["slug"]
+            if not target:
+                target = self.acc.hunt_slug or self._farm_resume_slug
             if target and self.can_send:
                 if self.combat_lock_ms() > 0:
                     self.queue_hunt(target)
@@ -880,7 +912,8 @@ class AccountConnection:
         now = time.monotonic()
         if now - self._last_auto_hunt_at < 20.0:
             return
-        cur_slug = (self.hunt.session.slug if self.hunt.session else None) or self.estado.get("huntSlug")
+        # Se estiver no Centro Pokémon, não está caçando — cur_slug = None força voltar à hunt (Auto-Hunt ou hunt fixa).
+        cur_slug = None if self.is_in_center() else (self.estado.get("huntSlug") or (self.hunt.session.slug if self.hunt.session else None))
         if self.acc.auto_best_hunt:
             best = self._pick_best_hunt_for_level()
             if best and best["slug"] != cur_slug and self.pending_hunt != best["slug"]:
@@ -900,6 +933,24 @@ class AccountConnection:
                 if any(isinstance(h, dict) and h.get("slug") == target for h in self.hunts):
                     self._last_auto_hunt_at = now
                     self.queue_hunt(target)
+
+    async def _check_auto_pass(self) -> None:
+        if not self.acc.auto_pass_claim or not self.can_send:
+            return
+        now = time.monotonic()
+        if now - self._last_pass_claim_at < 60.0:
+            return
+        if self.pass_status() != "ok":
+            return
+        self._last_pass_claim_at = now
+        self._auto_pass_claiming = True
+        await self.claim_pass()
+        log.info("[%s] Auto-Passe: resgate diário enviado automaticamente", self.acc.name)
+
+    async def set_active_pokemon(self, pokemon_id: int) -> None:
+        """Cliente → Servidor: team.active (troca qual Pokémon da equipe fica ativo)."""
+        await self.send_frame({"t": "team.active", "pokemonId": int(pokemon_id)})
+        log.info("[%s] team.active pokemonId=%s enviado", self.acc.name, pokemon_id)
 
     def _potion_stock(self, pid: int) -> int:
         return int((self.estado.get("items") or {}).get(str(pid), 0) or 0)
@@ -1041,7 +1092,7 @@ class AccountConnection:
                 attempts = 0
                 continue
             s = self.hunt.session
-            if s is not None and s.slug == slug:
+            if not self.is_in_center() and s is not None and s.slug == slug:
                 self.pending_hunt = None
                 continue
             if self.combat_lock_ms() > 0 or not self.can_send:
@@ -1056,7 +1107,7 @@ class AccountConnection:
             for _ in range(24):  # até 6s pela confirmação
                 await asyncio.sleep(0.25)
                 s = self.hunt.session
-                if (s is not None and s.slug == slug) or self.pending_hunt != slug:
+                if (not self.is_in_center() and s is not None and s.slug == slug) or self.pending_hunt != slug:
                     break
             else:
                 if attempts >= 4:
