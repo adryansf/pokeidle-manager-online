@@ -999,7 +999,11 @@ class AccountConnection:
         auto = self.estado.setdefault("automation", {})
         if isinstance(auto, dict):
             auto["autoColecao"] = regra
-        log.info("[%s] shop.autoColecao enviado", self.acc.name)
+            auto["autoLockShiny"] = bool((regra.get("shiny") or {}).get("on"))
+            auto["autoLockNota9"] = bool((regra.get("nota") or {}).get("on"))
+            auto["autoLockNotaMin"] = (regra.get("nota") or {}).get("min", 3.5)
+            auto["autoLockP5"] = bool((regra.get("pot") or {}).get("on"))
+        log.info("[%s] shop.autoColecao enviado: %s", self.acc.name, regra)
 
     async def move_collection(self, pokemon_id: int, target: str) -> None:
         """Cliente → Servidor: colecao.mover ('colecao' ou 'depot')."""

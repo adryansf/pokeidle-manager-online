@@ -111,18 +111,19 @@ def _collection_ids(est: dict) -> set[int]:
     return out
 
 
-_IV_STATS = ("hp", "atk", "def", "spa", "spd", "spe")
+_IV_STATS = ("hp", "atk", "def", "spAtk", "spDef", "speed")
+_IV_MIN, _IV_MAX = 1, 32
 
 
 def _normalize_auto_colecao(auto: dict) -> dict:
-    """Espelha `autoColecaoEfetiva` de shared/auto-colecao.mjs (7 critérios oficiais)."""
+    """Espelha `autoColecaoEfetiva` / `autoColecaoValida` de shared/auto-colecao.mjs (7 critérios oficiais)."""
     raw = auto.get("autoColecao") if isinstance(auto.get("autoColecao"), dict) else None
     cfg = {
         "lendario": {"on": True},
         "shiny": {"on": True},
         "pot": {"on": True, "min": 4},
         "qual": {"on": False, "min": 1.5},
-        "iv": {"on": False, "min": {s: 0 for s in _IV_STATS}},
+        "iv": {"on": False, "min": {s: _IV_MIN for s in _IV_STATS}},
         "nota": {"on": False, "min": 3.5},
         "potencial": {"on": False},
     }
@@ -174,8 +175,8 @@ def _normalize_auto_colecao(auto: dict) -> dict:
         if isinstance(mins, dict):
             for s in _IV_STATS:
                 try:
-                    iv_val = int(mins.get(s, 0))
-                    if 0 <= iv_val <= 31:
+                    iv_val = int(mins.get(s, _IV_MIN))
+                    if _IV_MIN <= iv_val <= _IV_MAX:
                         cfg["iv"]["min"][s] = iv_val
                 except (TypeError, ValueError):
                     pass

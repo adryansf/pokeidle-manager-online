@@ -11,13 +11,13 @@ import { fmtInt, fmtShort } from "@/lib/utils";
 type LocalFilter = "colecao" | "depot" | "equipe" | "todos";
 type SortKey = "grade" | "quality" | "potency" | "level" | "ivTotal" | "recent";
 
-const IV_STATS: { key: "hp" | "atk" | "def" | "spa" | "spd" | "spe"; label: string }[] = [
+const IV_STATS: { key: "hp" | "atk" | "def" | "spAtk" | "spDef" | "speed"; label: string }[] = [
   { key: "hp", label: "HP" },
   { key: "atk", label: "Atk" },
   { key: "def", label: "Def" },
-  { key: "spa", label: "SpA" },
-  { key: "spd", label: "SpD" },
-  { key: "spe", label: "Spe" },
+  { key: "spAtk", label: "SpA" },
+  { key: "spDef", label: "SpD" },
+  { key: "speed", label: "Spe" },
 ];
 
 const POT_OPTIONS = [2, 3, 4, 5] as const;
@@ -28,7 +28,7 @@ const DEFAULT_RULE: AutoColecaoRule = {
   shiny: { on: true },
   pot: { on: true, min: 4 },
   qual: { on: false, min: 1.5 },
-  iv: { on: false, min: { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 } },
+  iv: { on: false, min: { hp: 1, atk: 1, def: 1, spAtk: 1, spDef: 1, speed: 1 } },
   nota: { on: false, min: 3.5 },
   potencial: { on: false },
 };
@@ -43,12 +43,12 @@ function cloneRule(r?: AutoColecaoRule | null): AutoColecaoRule {
     iv: {
       on: Boolean(base.iv?.on),
       min: {
-        hp: Number(base.iv?.min?.hp ?? 0),
-        atk: Number(base.iv?.min?.atk ?? 0),
-        def: Number(base.iv?.min?.def ?? 0),
-        spa: Number(base.iv?.min?.spa ?? 0),
-        spd: Number(base.iv?.min?.spd ?? 0),
-        spe: Number(base.iv?.min?.spe ?? 0),
+        hp: Math.max(1, Math.min(32, Number(base.iv?.min?.hp ?? 1))),
+        atk: Math.max(1, Math.min(32, Number(base.iv?.min?.atk ?? 1))),
+        def: Math.max(1, Math.min(32, Number(base.iv?.min?.def ?? 1))),
+        spAtk: Math.max(1, Math.min(32, Number(base.iv?.min?.spAtk ?? 1))),
+        spDef: Math.max(1, Math.min(32, Number(base.iv?.min?.spDef ?? 1))),
+        speed: Math.max(1, Math.min(32, Number(base.iv?.min?.speed ?? 1))),
       },
     },
     nota: { on: Boolean(base.nota?.on), min: Number(base.nota?.min ?? 3.5) },
@@ -398,7 +398,7 @@ export function CollectionView({ account }: { account: string }) {
             {/* IV mínimo por atributo */}
             <RuleToggle
               label="IV mínimo por atributo"
-              hint="Só guarda se TODOS os atributos atingirem o piso definido (0 = ignora o atributo)"
+              hint="Só guarda se TODOS os atributos atingirem o piso definido (1 a 32; 1 = ignora o atributo)"
               on={draft.iv.on}
               onToggle={() => setDraft((d) => ({ ...d, iv: { ...d.iv, on: !d.iv.on } }))}
             >
@@ -408,14 +408,14 @@ export function CollectionView({ account }: { account: string }) {
                     <span className="text-[11px] font-bold uppercase text-mute">{label}</span>
                     <input
                       type="number"
-                      min={0}
-                      max={31}
+                      min={1}
+                      max={32}
                       value={draft.iv.min[key]}
                       onChange={(e) => {
-                        const v = Math.max(0, Math.min(31, Math.floor(Number(e.target.value) || 0)));
+                        const v = Math.max(1, Math.min(32, Math.floor(Number(e.target.value) || 1)));
                         setDraft((d) => ({
                           ...d,
-                          iv: { on: v > 0 ? true : d.iv.on, min: { ...d.iv.min, [key]: v } },
+                          iv: { on: v > 1 ? true : d.iv.on, min: { ...d.iv.min, [key]: v } },
                         }));
                       }}
                       className="field tnum w-full text-center text-xs font-bold sm:text-sm"

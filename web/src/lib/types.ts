@@ -46,7 +46,7 @@ export interface AutoColecaoRule {
   shiny: { on: boolean };
   pot: { on: boolean; min: number };
   qual: { on: boolean; min: number };
-  iv: { on: boolean; min: Record<"hp" | "atk" | "def" | "spa" | "spd" | "spe", number> };
+  iv: { on: boolean; min: Record<"hp" | "atk" | "def" | "spAtk" | "spDef" | "speed", number> };
   nota: { on: boolean; min: number };
   potencial: { on: boolean };
 }
