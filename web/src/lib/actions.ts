@@ -73,13 +73,15 @@ export interface LiveSlot {
 export interface LiveEvent {
   id?: number;
   ts: number;
-  kind: "attack" | "kill" | "ball" | "flee" | "hunt" | "buy" | string;
+  kind: "attack" | "kill" | "ball" | "flee" | "hunt" | "buy" | "potion" | "center" | string;
   slot?: number | null;
   name?: string | null;
   slug?: string | null;
   move?: string | null;
   damage?: number | null;
   hp?: number | null;
+  hpPct?: number | null;
+  manual?: boolean;
   level?: number | null;
   shiny?: boolean;
   xp?: number | null;
@@ -139,6 +141,13 @@ export const actions = {
   pause: (accId: string, paused?: boolean) =>
     call<PauseResult>("POST", `/api/accounts/${numId(accId)}/pause`, paused === undefined ? {} : { paused }),
   live: (accId: string) => call<AccountLive>("GET", `/api/accounts/${numId(accId)}/live`),
+  goCenter: (accId: string) => call<{ ok: boolean }>("POST", `/api/accounts/${numId(accId)}/center`),
+  bulkPause: (paused: boolean) => call<{ ok: boolean; paused: boolean; count: number }>("POST", "/api/bulk/pause", { paused }),
+  bulkCenter: () => call<{ ok: boolean; sent: string[]; skipped: string[] }>("POST", "/api/bulk/center"),
+  bulkEquip: (kind: "ball" | "potion", id: number) =>
+    call<{ ok: boolean; updated: string[]; skipped: string[] }>("POST", "/api/bulk/equip", { kind, id }),
+  bulkHunt: (slug: string) =>
+    call<{ ok: boolean; sent: string[]; queued: string[]; skipped: string[] }>("POST", "/api/bulk/hunt", { slug }),
 };
 
 export interface HuntSpecies {

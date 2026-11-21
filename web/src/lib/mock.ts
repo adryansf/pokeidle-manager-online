@@ -441,6 +441,33 @@ function installMockApi(accs: AccountSnapshot[]) {
       a.equipped![kind] = { ...opt };
       return json({ ok: true, stock: opt.qty, willBuy: opt.qty < 100, restockEnabled: true, buyable: id !== 5 });
     }
+    m = path.match(/^\/api\/accounts\/(\d+)\/center$/);
+    if (m && init?.method === "POST") {
+      await wait();
+      return json({ ok: true });
+    }
+    if (path === "/api/bulk/pause" && init?.method === "POST") {
+      await wait();
+      const { paused } = JSON.parse(String(init.body)) as { paused: boolean };
+      for (const a of accs) {
+        a.paused = paused;
+        a.status = paused ? "paused_cooldown" : "online";
+        a.state = paused ? "PAUSED_MANUAL" : "ONLINE";
+      }
+      return json({ ok: true, paused, count: accs.length });
+    }
+    if (path === "/api/bulk/center" && init?.method === "POST") {
+      await wait();
+      return json({ ok: true, sent: accs.map((a) => a.nick), skipped: [] });
+    }
+    if (path === "/api/bulk/equip" && init?.method === "POST") {
+      await wait();
+      return json({ ok: true, updated: accs.map((a) => a.nick), skipped: [] });
+    }
+    if (path === "/api/bulk/hunt" && init?.method === "POST") {
+      await wait();
+      return json({ ok: true, sent: accs.map((a) => a.nick), queued: [], skipped: [] });
+    }
     m = path.match(/^\/api\/accounts\/(\d+)\/pause$/);
     if (m && init?.method === "POST") {
       await wait();

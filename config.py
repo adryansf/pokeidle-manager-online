@@ -117,6 +117,10 @@ class AccountConfig:
     ball_id: int | None = None       # qual Ball repor; None = automation.ballIds do jogo
     ball_restock_threshold: int = DEFAULT_BALL_RESTOCK_THRESHOLD
     ball_restock_qty: int = DEFAULT_BALL_RESTOCK_QTY
+    gold_reserve: int = 0            # piso de ouro: não compra poção/bola se o gold estiver <= este valor
+    auto_potion_fallback: bool = True  # se a poção equipada zerar, troca para a próxima disponível na mochila
+    auto_center: bool = True         # emergência: HP baixo sem poções -> vai ao Centro Pokémon
+    auto_center_hp_pct: int = 20     # limiar de HP (%) para acionar o Auto-Centro de emergência
     pvp_auto: bool = False           # entra sozinho na fila do PVP ranqueado
 
     @property
@@ -144,6 +148,10 @@ OPTION_DEFAULTS: dict = {
     "ball_id": None,
     "ball_restock_threshold": DEFAULT_BALL_RESTOCK_THRESHOLD,
     "ball_restock_qty": DEFAULT_BALL_RESTOCK_QTY,
+    "gold_reserve": 0,
+    "auto_potion_fallback": True,
+    "auto_center": True,
+    "auto_center_hp_pct": 20,
     "pvp_auto": False,
 }
 
@@ -175,6 +183,10 @@ def build_account_config(d: dict) -> AccountConfig:
         ball_id=int(o["ball_id"]) if o["ball_id"] not in (None, "") else None,
         ball_restock_threshold=int(o["ball_restock_threshold"]),
         ball_restock_qty=int(o["ball_restock_qty"]),
+        gold_reserve=max(0, int(o.get("gold_reserve") or 0)),
+        auto_potion_fallback=bool(o.get("auto_potion_fallback", True)),
+        auto_center=bool(o.get("auto_center", True)),
+        auto_center_hp_pct=min(max(int(o.get("auto_center_hp_pct") or 20), 5), 80),
         pvp_auto=bool(o["pvp_auto"]),
     )
 

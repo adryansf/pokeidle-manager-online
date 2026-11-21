@@ -22,6 +22,10 @@ export interface AccountOptions {
   ball_id: number | null;
   ball_restock_threshold: number;
   ball_restock_qty: number;
+  gold_reserve?: number;
+  auto_potion_fallback?: boolean;
+  auto_center?: boolean;
+  auto_center_hp_pct?: number;
 }
 export interface AdminAccount {
   id: string;

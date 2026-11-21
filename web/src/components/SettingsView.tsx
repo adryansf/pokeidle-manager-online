@@ -524,6 +524,10 @@ function EditAccountDialog({ acc, onClose, onDone }: { acc: AdminAccount; onClos
     auto_ball_restock: o.auto_ball_restock,
     ball_restock_threshold: String(o.ball_restock_threshold),
     ball_restock_qty: String(o.ball_restock_qty),
+    gold_reserve: String(o.gold_reserve ?? 0),
+    auto_potion_fallback: o.auto_potion_fallback ?? true,
+    auto_center: o.auto_center ?? true,
+    auto_center_hp_pct: String(o.auto_center_hp_pct ?? 20),
   });
   const [paste, setPaste] = useState("");
   const [guide, setGuide] = useState<"bookmarklet" | "console">("bookmarklet");
@@ -544,6 +548,10 @@ function EditAccountDialog({ acc, onClose, onDone }: { acc: AdminAccount; onClos
           auto_ball_restock: opts.auto_ball_restock,
           ball_restock_threshold: Number(opts.ball_restock_threshold),
           ball_restock_qty: Number(opts.ball_restock_qty),
+          gold_reserve: Number(opts.gold_reserve || 0),
+          auto_potion_fallback: opts.auto_potion_fallback,
+          auto_center: opts.auto_center,
+          auto_center_hp_pct: Math.min(80, Math.max(5, Number(opts.auto_center_hp_pct || 20))),
         },
       };
       if (selectedProxyId === null && proxy.host.trim() && !Number(proxy.port)) throw new Error("Informe a porta do proxy.");
@@ -610,6 +618,27 @@ function EditAccountDialog({ acc, onClose, onDone }: { acc: AdminAccount; onClos
             <Labeled label="Quantidade a comprar">{num("ball_restock_qty")}</Labeled>
           </div>
         )}
+        {(opts.auto_potion || opts.auto_ball_restock) && (
+          <Labeled label="Reserva mínima de Gold (piso de segurança)" hint="0 = sem limite. O bot não compra poções/bolas se o saldo estiver abaixo deste valor.">
+            {num("gold_reserve")}
+          </Labeled>
+        )}
+        <div className="space-y-2 border-t border-line pt-2.5">
+          <h4 className="text-xs font-bold uppercase tracking-wide text-mute">Proteções</h4>
+          <Check2 checked={opts.auto_potion_fallback} onChange={(v) => setOpts({ ...opts, auto_potion_fallback: v })}>
+            Trocar automaticamente para a próxima poção disponível se a equipada zerar
+          </Check2>
+          <Check2 checked={opts.auto_center} onChange={(v) => setOpts({ ...opts, auto_center: v })}>
+            Auto-Centro Pokémon de emergência (ir curar se ficar sem poções e HP baixar)
+          </Check2>
+          {opts.auto_center && (
+            <div className="max-w-[220px]">
+              <Labeled label="Ir ao Centro abaixo de (% HP)" hint="Entre 5% e 80% (padrão: 20%).">
+                {num("auto_center_hp_pct")}
+              </Labeled>
+            </div>
+          )}
+        </div>
       </div>
       <details className="rounded-lg border border-line px-3 py-2.5" open={!!acc.blocked || acc.tokenStatus === "invalid"}>
         <summary className="cursor-pointer text-sm font-bold uppercase tracking-wide text-mute">Reimportar token</summary>

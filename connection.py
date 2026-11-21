@@ -37,7 +37,7 @@ from pvp import PvpManager
 from notify import GOLD, GREEN, RED, DailyStats, Notifier, fmt_duration, rare_icon_url
 from item_labels import item_name
 from session_stats import ITEM_LABELS, TRACKED, SessionItems, SessionStore, ShinyTracker
-from shop import AutoRestock, ShopManager, ball_ids_resolver, potion_ids_resolver
+from shop import AutoRestock, KNOWN_POTION_IDS, POTION_FALLBACK_ORDER, ShopManager, ball_ids_resolver, potion_ids_resolver
 
 log = logging.getLogger("conn")
 
@@ -238,17 +238,22 @@ class AccountConnection:
         self.shop = ShopManager(account.name, self.estado)
         self.market = MarketClient(account.name, self.estado)
         self.pending_hunt: str | None = None      # hunt pedida no painel, aguardando a trava de combate acabar
+        self._last_potion_fallback_at: float = 0.0
+        self._last_auto_center_at: float = 0.0
+        self._center_return_slug: str | None = None
         self.restockers: list[AutoRestock] = []
         if account.auto_potion:
             self.restockers.append(AutoRestock(
                 account.name, self.estado, self.shop, kind="item",
                 get_ids=potion_ids_resolver(self.estado, self.hunt.active_pokemon, lambda: self.acc.potion_id),
-                threshold=account.potion_restock_threshold, qty=account.potion_restock_qty))
+                threshold=account.potion_restock_threshold, qty=account.potion_restock_qty,
+                gold_reserve=lambda: self.acc.gold_reserve))
         if account.auto_ball_restock:
             self.restockers.append(AutoRestock(
                 account.name, self.estado, self.shop, kind="ball",
                 get_ids=ball_ids_resolver(self.estado, account.ball_priority, lambda: self.acc.ball_id),
-                threshold=account.ball_restock_threshold, qty=account.ball_restock_qty))
+                threshold=account.ball_restock_threshold, qty=account.ball_restock_qty,
+                gold_reserve=lambda: self.acc.gold_reserve))
         self.inventory = InventoryView(self.estado)
         self.pvp = PvpManager(account.name, self.estado, auto=account.pvp_auto)
         self._log = logging.LoggerAdapter(log, {})
@@ -423,6 +428,7 @@ class AccountConnection:
                     asyncio.create_task(self._frame_watchdog(ws)),
                     asyncio.create_task(self._inventory_logger()),
                     asyncio.create_task(self._hunt_queue_loop()),
+                    asyncio.create_task(self._safety_loop()),
                     asyncio.create_task(self.pvp.run_forever(lambda: int(self.estado.get("level") or 0))),
                 ]
                 if self.acc.auto_catch:
@@ -634,6 +640,99 @@ class AccountConnection:
             await asyncio.sleep(config.POTION_CHECK_INTERVAL_S)
             for r in self.restockers:
                 await r.check_and_restock()
+
+    async def _safety_loop(self) -> None:
+        """Proteções automáticas:
+        1) Fallback de poção: se a poção equipada zerar e não houver recompra ativa (ou gold abaixo da reserva),
+           equipa automaticamente a próxima poção disponível na mochila.
+        2) Auto-Centro Pokémon: se o HP cair abaixo do limiar configurado sem poções disponíveis,
+           manda o personagem ao Centro Pokémon e retorna à hunt quando curar.
+        """
+        while True:
+            await asyncio.sleep(3.0)
+            if not self.can_send:
+                continue
+            try:
+                await self._check_potion_fallback()
+                await self._check_auto_center()
+            except Exception as e:  # noqa: BLE001
+                log.debug("[%s] safety_loop erro ignorado: %r", self.acc.name, e)
+
+    def _potion_stock(self, pid: int) -> int:
+        return int((self.estado.get("items") or {}).get(str(pid), 0) or 0)
+
+    async def _check_potion_fallback(self) -> None:
+        if not self.acc.auto_potion_fallback:
+            return
+        # Se a autocompra de poções está ligada E o gold permite comprar, deixa o AutoRestock repor primeiro.
+        if self.acc.auto_potion:
+            reserve = max(0, int(self.acc.gold_reserve or 0))
+            if reserve == 0 or int(self.estado.get("gold") or 0) > reserve:
+                return
+        now = time.monotonic()
+        if now - self._last_potion_fallback_at < 15.0:
+            return
+        auto = self.estado.get("automation") or {}
+        cur_ids = [int(x) for x in (auto.get("potionIds") or []) if int(x) in KNOWN_POTION_IDS]
+        cur_id = cur_ids[0] if cur_ids else self.acc.potion_id
+        if cur_id is not None and self._potion_stock(cur_id) > 0:
+            return
+        next_id = next((pid for pid in POTION_FALLBACK_ORDER if pid != cur_id and self._potion_stock(pid) > 0), None)
+        if next_id is None:
+            return
+        self._last_potion_fallback_at = now
+        await self.set_automation({"potionIds": [next_id]})
+        self.acc = replace(self.acc, potion_id=next_id)
+        pname = item_name(next_id) or f"Poção #{next_id}"
+        self.hunt._push_live_event("potion", name=pname, qty=self._potion_stock(next_id))
+        log.info("[%s] fallback de poção: trocado para %s (estoque=%d)",
+                 self.acc.name, pname, self._potion_stock(next_id))
+
+    async def _check_auto_center(self) -> None:
+        if not self.acc.auto_center:
+            return
+        pk = self.hunt.active_pokemon()
+        if not pk:
+            return
+        hp = int(pk.get("hp") or 0)
+        max_hp = int(pk.get("maxHp") or 0)
+        if max_hp <= 0:
+            return
+        hp_pct = (hp / max_hp) * 100.0
+        # Se já voltou ao normal depois de ir ao centro, retoma a hunt anterior se necessário.
+        if self._center_return_slug and hp_pct >= 95.0:
+            ret_slug = self._center_return_slug
+            self._center_return_slug = None
+            cur_slug = self.hunt.session.slug if self.hunt.session else self.estado.get("huntSlug")
+            if cur_slug != ret_slug and self.combat_lock_ms() == 0:
+                await self.hunt.select_hunt(ret_slug)
+            return
+        if hp <= 0 or hp_pct > self.acc.auto_center_hp_pct:
+            return
+        # Só aciona se realmente não houver poções para curar (ou autoPotion desligado).
+        has_any_potion = any(self._potion_stock(pid) > 0 for pid in KNOWN_POTION_IDS)
+        auto_on = bool((self.estado.get("automation") or {}).get("autoPotion", True))
+        if has_any_potion and auto_on:
+            return
+        now = time.monotonic()
+        if now - self._last_auto_center_at < 45.0:
+            return
+        if self.combat_lock_ms() > 0:
+            return
+        self._last_auto_center_at = now
+        cur_slug = self.hunt.session.slug if self.hunt.session else self.estado.get("huntSlug")
+        if cur_slug:
+            self._center_return_slug = cur_slug
+        await self.hunt.go_to_center()
+        self.hunt._push_live_event("center", name=pk.get("nome"), hpPct=round(hp_pct, 1))
+        log.warning("[%s] Auto-Centro acionado: %s com %.0f%% HP sem poções",
+                    self.acc.name, pk.get("nome", "?"), hp_pct)
+        if self.notifier:
+            self.notifier.send(
+                self.acc.nick,
+                f"🏥 **Auto-Centro de emergência:** {pk.get('nome', 'Pokémon')} atingiu **{hp_pct:.0f}% HP** sem poções.",
+                GOLD,
+            )
 
     # ----------------------------------------------------------- comandos do painel
     @property

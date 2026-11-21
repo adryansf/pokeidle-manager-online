@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from auth import Auth
-from connection import AccountConnection
+from connection import AccountConnection, State
 from game_data import BALL_NAMES
 from shop import BUYABLE_BALL_IDS, KNOWN_POTION_IDS
 from store import Store
@@ -44,6 +44,19 @@ class EquipIn(BaseModel):
 
 class PauseIn(BaseModel):
     paused: bool | None = None
+
+
+class BulkPauseIn(BaseModel):
+    paused: bool
+
+
+class BulkEquipIn(BaseModel):
+    kind: Literal["ball", "potion"]
+    id: int
+
+
+class BulkHuntIn(BaseModel):
+    slug: str
 
 
 def hunt_catalog(conn: AccountConnection) -> list[dict]:
@@ -381,11 +394,20 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
             raw_s = conn.hunt.live_slots[slot_id]
             sname = str(raw_s.get("name") or "").strip()
             pid = raw_s.get("pokeId") or (name_to_pid.get(sname.lower()) if sname else None)
+            try:
+                pid_int = int(pid) if pid is not None else None
+            except (TypeError, ValueError):
+                pid_int = None
+            raw_ball = raw_s.get("ballId")
+            try:
+                ball_int = int(raw_ball) if raw_ball is not None else None
+            except (TypeError, ValueError):
+                ball_int = None
             slots.append({
                 "slot": slot_id,
-                "name": sname or (POKEMON_NAMES.get(int(pid)) if pid else f"Selvagem #{slot_id}"),
-                "pokeId": pid,
-                "looktype": _look_for(pid, raw_s.get("looktype")),
+                "name": sname or (POKEMON_NAMES.get(pid_int) if pid_int else f"Selvagem #{slot_id}"),
+                "pokeId": pid_int,
+                "looktype": _look_for(pid_int, raw_s.get("looktype")),
                 "level": raw_s.get("level"),
                 "shiny": bool(raw_s.get("shiny")),
                 "hp": raw_s.get("hp"),
@@ -393,8 +415,8 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
                 "state": raw_s.get("state", "fighting"),
                 "lastMove": raw_s.get("lastMove"),
                 "lastDamage": raw_s.get("lastDamage"),
-                "ballId": raw_s.get("ballId"),
-                "ballName": BALL_NAMES.get(int(raw_s["ballId"])) if raw_s.get("ballId") else None,
+                "ballId": ball_int,
+                "ballName": BALL_NAMES.get(ball_int) if ball_int is not None else None,
                 "chance": raw_s.get("chance"),
                 "xp": raw_s.get("xp"),
                 "gold": raw_s.get("gold"),
@@ -405,7 +427,10 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
         if isinstance(hunt_obj, dict):
             for e in hunt_obj.get("especies") or []:
                 if isinstance(e, dict) and e.get("pokeId"):
-                    epid = int(e["pokeId"])
+                    try:
+                        epid = int(e["pokeId"])
+                    except (TypeError, ValueError):
+                        continue
                     hunt_species.append({
                         "pokeId": epid,
                         "name": e.get("nome") or POKEMON_NAMES.get(epid) or f"#{epid}",
@@ -440,3 +465,100 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
             "slots": slots,
             "events": list(conn.hunt.live_events),
         }
+
+    @app.post("/api/accounts/{acc_id}/center")
+    async def go_center(acc_id: int, request: Request, tok: str | None = Query(None, alias="token")):
+        """Envia a conta ao Centro Pokémon (centro.ir)."""
+        if (r := guard(request, tok)):
+            return r
+        conn = conn_of(acc_id)
+        if conn is None:
+            return JSONResponse({"error": "conta não encontrada ou desligada"}, status_code=404)
+        if not conn.can_send:
+            return JSONResponse({"error": "conta offline no momento"}, status_code=409)
+        lock = conn.combat_lock_ms()
+        if lock > 0:
+            return JSONResponse({"error": f"Em combate — aguarde {int((lock + 999) // 1000)}s para ir ao Centro."}, status_code=409)
+        await conn.hunt.go_to_center()
+        conn.hunt._push_live_event("center", name=conn.acc.nick, manual=True)
+        return {"ok": True}
+
+    # ---------------------------------------------------------- Ações em Massa (Modo Eco)
+    @app.post("/api/bulk/pause")
+    async def bulk_pause(body: BulkPauseIn, request: Request, tok: str | None = Query(None, alias="token")):
+        """Pausa ou retoma todas as contas gerenciadas de uma vez."""
+        if (r := guard(request, tok)):
+            return r
+        conns = manager.connections()
+        for c in conns:
+            await c.set_manual_pause(body.paused)
+        return {"ok": True, "paused": body.paused, "count": len(conns)}
+
+    @app.post("/api/bulk/center")
+    async def bulk_center(request: Request, tok: str | None = Query(None, alias="token")):
+        """Envia todas as contas online (fora de trava de combate) ao Centro Pokémon."""
+        if (r := guard(request, tok)):
+            return r
+        sent: list[str] = []
+        skipped: list[str] = []
+        for c in manager.connections():
+            if not c.can_send or c.combat_lock_ms() > 0:
+                skipped.append(c.acc.nick)
+                continue
+            try:
+                await c.hunt.go_to_center()
+                c.hunt._push_live_event("center", name=c.acc.nick, manual=True)
+                sent.append(c.acc.nick)
+            except Exception:  # noqa: BLE001
+                skipped.append(c.acc.nick)
+        return {"ok": True, "sent": sent, "skipped": skipped}
+
+    @app.post("/api/bulk/equip")
+    async def bulk_equip(body: BulkEquipIn, request: Request, tok: str | None = Query(None, alias="token")):
+        """Equipa a mesma Poção ou Bola em todas as contas online."""
+        if (r := guard(request, tok)):
+            return r
+        is_ball = body.kind == "ball"
+        valid = set(BALL_NAMES) if is_ball else KNOWN_POTION_IDS
+        if body.id not in valid:
+            return JSONResponse({"error": "item desconhecido"}, status_code=400)
+        field = "ballIds" if is_ball else "potionIds"
+        opt = "ball_id" if is_ball else "potion_id"
+        updated: list[str] = []
+        skipped: list[str] = []
+        for c in manager.connections():
+            if not c.can_send:
+                skipped.append(c.acc.nick)
+                continue
+            try:
+                await c.set_automation({field: [body.id]})
+                c.acc = replace(c.acc, **{opt: body.id})
+                store.update_account(c.acc.index, {"options": {opt: body.id}})
+                updated.append(c.acc.nick)
+            except Exception:  # noqa: BLE001
+                skipped.append(c.acc.nick)
+        return {"ok": True, "updated": updated, "skipped": skipped}
+
+    @app.post("/api/bulk/hunt")
+    async def bulk_hunt(body: BulkHuntIn, request: Request, tok: str | None = Query(None, alias="token")):
+        """Seleciona (ou coloca na fila de combate) a mesma hunt em todas as contas online."""
+        if (r := guard(request, tok)):
+            return r
+        sent: list[str] = []
+        queued: list[str] = []
+        skipped: list[str] = []
+        for c in manager.connections():
+            if not c.can_send or not any(h.get("slug") == body.slug for h in c.hunts if isinstance(h, dict)):
+                skipped.append(c.acc.nick)
+                continue
+            if c.combat_lock_ms() > 0:
+                c.queue_hunt(body.slug)
+                queued.append(c.acc.nick)
+            else:
+                try:
+                    c.queue_hunt(None)
+                    await c.hunt.select_hunt(body.slug)
+                    sent.append(c.acc.nick)
+                except Exception:  # noqa: BLE001
+                    skipped.append(c.acc.nick)
+        return {"ok": True, "sent": sent, "queued": queued, "skipped": skipped}

@@ -57,6 +57,10 @@ class OptionsIn(BaseModel):
     ball_id: int | None = None
     ball_restock_threshold: int | None = Field(None, ge=0, le=100000)
     ball_restock_qty: int | None = Field(None, ge=1, le=100000)
+    gold_reserve: int | None = Field(None, ge=0, le=10_000_000_000)
+    auto_potion_fallback: bool | None = None
+    auto_center: bool | None = None
+    auto_center_hp_pct: int | None = Field(None, ge=5, le=80)
     pvp_auto: bool | None = None
 
 

@@ -1,7 +1,8 @@
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from "framer-motion";
-import { Bell, Globe, LayoutDashboard, Map as MapIcon, MessagesSquare, Package, RotateCcw, Settings, Store, Swords, Ticket } from "lucide-react";
+import { Bell, Globe, Layers, LayoutDashboard, Map as MapIcon, MessagesSquare, Package, RotateCcw, Settings, Store, Swords, Ticket } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccountCard, type CardDrag, type CardMode } from "@/components/AccountCard";
+import { BulkActionsModal } from "@/components/BulkActionsModal";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { AccountSelect, InventoryView } from "@/components/InventoryView";
 import { MapaView } from "@/components/MapaView";
@@ -172,6 +173,7 @@ export default function App() {
   const [mode, setMode] = useState<CardMode>("resumo");
   const [notifyOpen, setNotifyOpen] = useState(false);
   const [proxyCenterOpen, setProxyCenterOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetErr, setResetErr] = useState("");
@@ -273,8 +275,18 @@ export default function App() {
                       <Segmented id="mode" options={MODES} value={mode} onChange={setMode} />
                       <button
                         type="button"
-                        aria-label="Central de Proxies"
+                        aria-label="Ações em Massa (Modo Eco)"
                         className="btn ml-auto sm:ml-0"
+                        onClick={() => setBulkOpen(true)}
+                        title="Pausar/retomar todas, enviar ao Centro, equipar poção/bola ou trocar hunt em massa"
+                      >
+                        <Layers className="size-4 text-poke-gold" aria-hidden />
+                        <span className="hidden sm:inline">Em massa</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Central de Proxies"
+                        className="btn"
                         onClick={() => setProxyCenterOpen(true)}
                         title="Gerenciar, testar e aplicar proxies nas contas"
                       >
@@ -314,6 +326,7 @@ export default function App() {
 
           <AnimatePresence>{notifyOpen && <NotificationsModal onClose={() => setNotifyOpen(false)} />}</AnimatePresence>
           <AnimatePresence>{proxyCenterOpen && <ProxyCenterModal onClose={() => setProxyCenterOpen(false)} />}</AnimatePresence>
+          <AnimatePresence>{bulkOpen && <BulkActionsModal onClose={() => setBulkOpen(false)} />}</AnimatePresence>
 
           <ConfirmDialog
             open={resetOpen}

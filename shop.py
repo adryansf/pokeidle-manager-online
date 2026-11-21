@@ -39,6 +39,8 @@ log = logging.getLogger("shop")
 
 # spec do protocolo §15.7 — nível de confirmação indicado nos comentários acima.
 KNOWN_POTION_IDS = {200, 201, 202, 203, 204, 70070}
+# Ordem de fallback (da mais forte para a mais simples) quando a poção equipada zera.
+POTION_FALLBACK_ORDER = (70070, 204, 203, 202, 201, 200)
 # spec do protocolo §15.4: a Beast Ball (5) não é vendida na loja NPC.
 BUYABLE_BALL_IDS = {1, 2, 3, 4}
 BUY_CONFIRM_TIMEOUT_S = 20  # sem k:"compra" depois disso, libera a próxima tentativa
@@ -140,7 +142,7 @@ class AutoRestock:
     RETRY_S = 30  # não repete a compra do mesmo ID antes disso (ex.: gold insuficiente)
 
     def __init__(self, account_name: str, estado: dict, shop: ShopManager, *, kind: str,
-                 get_ids, threshold: int, qty: int):
+                 get_ids, threshold: int, qty: int, gold_reserve=0):
         self.account_name = account_name
         self.estado = estado
         self.shop = shop
@@ -148,14 +150,24 @@ class AutoRestock:
         self._get_ids = get_ids     # callable -> list[int]
         self.threshold = threshold
         self.qty = qty
+        self._gold_reserve = gold_reserve
         self._last_try: dict[int, float] = {}
 
     def _stock(self, item_id: int) -> int:
         bucket = "balls" if self.kind == "ball" else "items"
         return int((self.estado.get(bucket) or {}).get(str(item_id), 0) or 0)
 
+    def _below_gold_reserve(self) -> bool:
+        reserve = max(0, int(_live(self._gold_reserve) or 0))
+        if reserve <= 0:
+            return False
+        gold = int(self.estado.get("gold") or 0)
+        return gold <= reserve
+
     async def check_and_restock(self) -> None:
         if self.shop.awaiting_confirmation:
+            return
+        if self._below_gold_reserve():
             return
         now = time.monotonic()
         for item_id in self._get_ids():

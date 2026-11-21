@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Crosshair,
   ExternalLink,
+  HeartPulse,
   Pause,
   Play,
   Radio,
@@ -164,6 +165,12 @@ function formatLiveEvent(ev: LiveEvent): string {
       return `🗺️ Entrou na hunt ${ev.name || ev.slug || "?"}`;
     case "buy":
       return `🛒 Comprou ${ev.qty ?? 1}× ${ev.name || "item"}${ev.cost ? ` (${fmtShort(ev.cost)}g)` : ""}`;
+    case "potion":
+      return `🧪 Fallback de poção: trocou para ${ev.name || "outra poção"}${ev.qty ? ` (×${fmtShort(ev.qty)})` : ""}`;
+    case "center":
+      return ev.manual
+        ? `🏥 Enviado ao Centro Pokémon pelo painel`
+        : `🏥 Auto-Centro de emergência (${ev.name || "Pokémon"} com ${ev.hpPct ?? "?"}% HP)`;
     default:
       return `${ev.kind}: ${target}`;
   }
@@ -179,6 +186,8 @@ function eventTone(ev: LiveEvent) {
     case "kill":
       return "border-line bg-tile/70 text-fg";
     case "buy":
+    case "potion":
+    case "center":
       return "border-[#7a5a1c] bg-[#33260e]/50 text-poke-gold";
     case "hunt":
       return "border-edge/50 bg-tile text-poke-gold";
@@ -192,6 +201,7 @@ export function LiveModal({ accId, open, onClose }: { accId: string; open: boole
   const [live, setLive] = useState<AccountLive | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pauseBusy, setPauseBusy] = useState(false);
+  const [centerBusy, setCenterBusy] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const inFlight = useRef(false);
   const onCloseRef = useRef(onClose);
@@ -215,7 +225,7 @@ export function LiveModal({ accId, open, onClose }: { accId: string; open: boole
   useEffect(() => {
     if (!open) return;
     void fetchLive();
-    const timer = window.setInterval(() => void fetchLive(), 1000);
+    const timer = window.setInterval(() => void fetchLive(), 800);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCloseRef.current();
     };
@@ -225,6 +235,19 @@ export function LiveModal({ accId, open, onClose }: { accId: string; open: boole
       document.removeEventListener("keydown", onKey);
     };
   }, [open, fetchLive]);
+
+  const sendToCenter = async () => {
+    setCenterBusy(true);
+    setError(null);
+    try {
+      await actions.goCenter(accId);
+      await fetchLive();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Não foi possível ir ao Centro Pokémon");
+    } finally {
+      setCenterBusy(false);
+    }
+  };
 
   const togglePause = async () => {
     setPauseBusy(true);
@@ -324,6 +347,22 @@ export function LiveModal({ accId, open, onClose }: { accId: string; open: boole
 
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                 {acc && <StatusPill status={acc.status} />}
+                {isOnline && (
+                  <button
+                    type="button"
+                    onClick={() => void sendToCenter()}
+                    disabled={centerBusy || (live?.combatLockMs ?? 0) > 0}
+                    title={
+                      (live?.combatLockMs ?? 0) > 0
+                        ? "Aguarde a trava de combate acabar para ir ao Centro Pokémon"
+                        : "Enviar esta conta ao Centro Pokémon para curar"
+                    }
+                    className="btn flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold disabled:opacity-50"
+                  >
+                    <HeartPulse className="size-3.5 text-poke-red" aria-hidden />
+                    <span className="hidden sm:inline">{centerBusy ? "Indo…" : "Centro"}</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => void togglePause()}
