@@ -1,5 +1,5 @@
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from "framer-motion";
-import { LayoutDashboard, Map as MapIcon, MessagesSquare, Package, RotateCcw, Settings, Store, Swords, Ticket } from "lucide-react";
+import { Bell, LayoutDashboard, Map as MapIcon, MessagesSquare, Package, RotateCcw, Settings, Store, Swords, Ticket } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccountCard, type CardDrag, type CardMode } from "@/components/AccountCard";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
@@ -8,7 +8,7 @@ import { MapaView } from "@/components/MapaView";
 import { MarketView } from "@/components/market/MarketView";
 import { PassView } from "@/components/PassView";
 import { PvpView } from "@/components/PvpView";
-import { SettingsView } from "@/components/SettingsView";
+import { NotificationsModal, SettingsView } from "@/components/SettingsView";
 import { SummaryBar } from "@/components/SummaryBar";
 import { UpdateBanner } from "@/components/UpdateCard";
 import { ChatDock, ChatPopoutHost, ChatView, CommunityColumn, CommunityStrip, useDockMode } from "@/components/Sidebars";
@@ -170,6 +170,7 @@ function Dashboard({ mode }: { mode: CardMode }) {
 export default function App() {
   const [tab, setTab] = useState<Tab>(readTab);
   const [mode, setMode] = useState<CardMode>("resumo");
+  const [notifyOpen, setNotifyOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetErr, setResetErr] = useState("");
@@ -267,13 +268,23 @@ export default function App() {
                 {/* Sem animação de saída: o elemento que sai (popLayout) ficava preso por cima das abas. */}
                 {tab === "dashboard" ? (
                   <motion.div key="mode" className="w-full sm:w-auto" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2, ease: EASE }}>
-                    {/* Resumo/Sessão e o botão de zerar na mesma linha. */}
+                    {/* Resumo/Sessão, botão de Notificações (Discord/Telegram) e botão de zerar na mesma linha. */}
                     <div className="flex flex-wrap items-center gap-1.5 sm:gap-2.5">
                       <Segmented id="mode" options={MODES} value={mode} onChange={setMode} />
                       <button
                         type="button"
-                        aria-label="Zerar sessão"
+                        aria-label="Notificações (Discord e Telegram)"
                         className="btn ml-auto sm:ml-0"
+                        onClick={() => setNotifyOpen(true)}
+                        title="Configurar notificações do Discord e/ou Telegram"
+                      >
+                        <Bell className="size-4 text-poke-gold" aria-hidden />
+                        <span className="hidden sm:inline">Notificações</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Zerar sessão"
+                        className="btn"
                         onClick={() => setResetOpen(true)}
                         title="Zerar o tempo, os itens e os shinies da sessão de todas as contas"
                       >
@@ -290,6 +301,8 @@ export default function App() {
               </LayoutGroup>
             </div>
           </header>
+
+          <AnimatePresence>{notifyOpen && <NotificationsModal onClose={() => setNotifyOpen(false)} />}</AnimatePresence>
 
           <ConfirmDialog
             open={resetOpen}

@@ -55,17 +55,10 @@ Quando `TELEMETRY_TOKEN` é definido nas variáveis de ambiente:
    ```text
    docker-compose.dokploy.yml
    ```
-2. Na aba **Environment**, defina:
+2. Na aba **Environment**, defina apenas o secret de proteção e o seu domínio (todo o resto — contas, proxies, **Discord e Telegram** — é configurado diretamente na interface do Dashboard):
    ```env
    TELEMETRY_TOKEN=coloque-aqui-um-secret-forte-de-32-caracteres
    PUBLIC_URL=https://pokeidle.seudominio.com
-   REPORT_TZ=America/Sao_Paulo
-   DAILY_REPORT_HOUR=0
-
-   # Gateways de notificação (opcionais — também configuráveis pelo painel web):
-   DISCORD_WEBHOOK_URL=
-   TELEGRAM_BOT_TOKEN=
-   TELEGRAM_CHAT_ID=
    ```
 3. Na aba **Domains**, adicione o seu domínio apontando para o serviço `pokeidle` na porta **`8080`** com **HTTPS (Let's Encrypt)** ativado.
 4. Clique em **Deploy**. Todos os dados (banco SQLite `app.db`, sessões e estatísticas diárias) ficam persistidos no volume `/data`.

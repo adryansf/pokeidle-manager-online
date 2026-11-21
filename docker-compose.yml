@@ -22,14 +22,9 @@ services:
       UPDATE_CHECK: "${UPDATE_CHECK:-0}"
       # Obrigatório em produção/domínio público: protege o painel desde o 1º boot (vale como senha e Bearer token).
       TELEMETRY_TOKEN: "${TELEMETRY_TOKEN:-}"
-      # URL pública HTTPS do painel (ex.: https://pokeidle.seudominio.com)
+      # URL pública HTTPS do painel (ex.: https://pokeidle.seudominio.com).
+      # Todo o resto (contas, proxies, Discord e Telegram) é configurado direto no Dashboard web!
       PUBLIC_URL: "${PUBLIC_URL:-}"
-      # Gateways de notificação opcionais (também configuráveis direto pelo painel em Configurações -> Geral):
-      DISCORD_WEBHOOK_URL: "${DISCORD_WEBHOOK_URL:-}"
-      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
-      TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID:-}"
-      REPORT_TZ: "${REPORT_TZ:-America/Sao_Paulo}"
-      DAILY_REPORT_HOUR: "${DAILY_REPORT_HOUR:-0}"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
       interval: 30s

@@ -714,7 +714,15 @@ function Group({ title, badge, children }: { title: string; badge?: React.ReactN
   );
 }
 
-function GlobalForm() {
+export function NotificationsModal({ onClose }: { onClose: () => void }) {
+  return (
+    <Modal title="Notificações (Discord e Telegram)" onClose={onClose} wide>
+      <GlobalForm onlyNotifications />
+    </Modal>
+  );
+}
+
+function GlobalForm({ onlyNotifications = false }: { onlyNotifications?: boolean }) {
   const [s, setS] = useState<GlobalSettings | null>(null);
   const [form, setForm] = useState({ ws_url: "", report_hour: 0, report_tz: "", public_url: "" });
   const [wait, setWait] = useState("5"); // minutos de espera após login em outro lugar (texto: dá para apagar e digitar)
@@ -761,162 +769,166 @@ function GlobalForm() {
 
   return (
     <div className="space-y-5">
-      <Group
-        title="Gateway: Discord"
-        badge={<Chip on={discordActive} label={s.hasWebhook ? (s.discord_enabled ? "Ativo" : "Pausado") : "Desligado"} />}
-      >
-        {s.hasWebhook && (
-          <Check2
-            checked={s.discord_enabled}
-            onChange={(v) =>
-              run(async () => fill(await admin.saveSettings({ discord_enabled: v })), v ? "Discord ativado." : "Discord pausado.")
-            }
-          >
-            Enviar notificações para o Discord {s.webhookHint && <span className="text-xs text-mute">({s.webhookHint})</span>}
-          </Check2>
-        )}
-        {hook === null ? (
-          <div className="flex flex-wrap gap-1.5">
-            <button className="btn" onClick={() => setHook("")}>
-              {s.hasWebhook ? "Trocar webhook" : "Configurar webhook"}
-            </button>
-            {s.hasWebhook && (
-              <>
-                <button
-                  className="btn"
-                  disabled={busy}
-                  onClick={() => run(() => admin.testWebhook("discord").then(() => undefined), "Mensagem de teste enviada ao Discord.")}
-                >
-                  Enviar teste
-                </button>
-                <button className="btn" onClick={() => setConfirmRemove("discord")}>
-                  Remover
-                </button>
-              </>
-            )}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-line bg-black/20 p-3.5 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-fg">Discord (Webhook)</h3>
+            <Chip on={discordActive} label={s.hasWebhook ? (s.discord_enabled ? "Ativo" : "Pausado") : "Desligado"} />
           </div>
-        ) : (
-          <div className="space-y-2">
-            <input
-              className="field w-full"
-              type="password"
-              value={hook}
-              onChange={(e) => setHook(e.target.value)}
-              placeholder="https://discord.com/api/webhooks/…"
-              autoComplete="off"
-              autoFocus
-            />
-            <div className="flex gap-1.5">
-              <button
-                className="btn border-0 bg-poke-gold font-bold text-void hover:bg-[#f6ca5e]"
-                disabled={busy || !hook.trim()}
-                onClick={() =>
-                  run(async () => {
-                    fill(await admin.saveSettings({ discord_webhook: hook.trim(), discord_enabled: true }));
-                    setHook(null);
-                  }, "Webhook do Discord salvo.")
-                }
-              >
-                Salvar
-              </button>
-              <button className="btn" onClick={() => setHook(null)}>
-                Cancelar
-              </button>
-            </div>
-          </div>
-        )}
-      </Group>
-
-      <Group
-        title="Gateway: Telegram"
-        badge={<Chip on={telegramActive} label={s.hasTelegram ? (s.telegram_enabled ? "Ativo" : "Pausado") : "Desligado"} />}
-      >
-        {s.hasTelegram && (
-          <Check2
-            checked={s.telegram_enabled}
-            onChange={(v) =>
-              run(async () => fill(await admin.saveSettings({ telegram_enabled: v })), v ? "Telegram ativado." : "Telegram pausado.")
-            }
-          >
-            Enviar notificações para o Telegram{" "}
-            <span className="text-xs text-mute">
-              (Chat: {s.telegram_chat_id} · Bot: {s.telegramTokenHint})
-            </span>
-          </Check2>
-        )}
-        {tgForm === null ? (
-          <div className="flex flex-wrap gap-1.5">
-            <button className="btn" onClick={() => setTgForm({ token: "", chatId: s.telegram_chat_id || "" })}>
-              {s.hasTelegram ? "Trocar Bot / Chat ID" : "Configurar Telegram"}
-            </button>
-            {s.hasTelegram && (
-              <>
-                <button
-                  className="btn"
-                  disabled={busy}
-                  onClick={() => run(() => admin.testWebhook("telegram").then(() => undefined), "Mensagem de teste enviada ao Telegram.")}
-                >
-                  Enviar teste
-                </button>
-                <button className="btn" onClick={() => setConfirmRemove("telegram")}>
-                  Remover
-                </button>
-              </>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-2.5 rounded-lg border border-line p-3">
-            <Labeled
-              label="Token do Bot (@BotFather)"
-              hint={s.hasTelegram ? `Atual: ${s.telegramTokenHint}. Deixe em branco para manter o token atual.` : "Ex.: 123456789:ABCdefGHIjklMNOpqrSTUvwxYZ"}
+          {s.hasWebhook && (
+            <Check2
+              checked={s.discord_enabled}
+              onChange={(v) =>
+                run(async () => fill(await admin.saveSettings({ discord_enabled: v })), v ? "Discord ativado." : "Discord pausado.")
+              }
             >
+              Receber no Discord {s.webhookHint && <span className="text-xs text-mute">({s.webhookHint})</span>}
+            </Check2>
+          )}
+          {hook === null ? (
+            <div className="flex flex-wrap gap-1.5">
+              <button className="btn" onClick={() => setHook("")}>
+                {s.hasWebhook ? "Trocar webhook" : "Configurar Discord"}
+              </button>
+              {s.hasWebhook && (
+                <>
+                  <button
+                    className="btn"
+                    disabled={busy}
+                    onClick={() => run(() => admin.testWebhook("discord").then(() => undefined), "Mensagem de teste enviada ao Discord.")}
+                  >
+                    Enviar teste
+                  </button>
+                  <button className="btn" onClick={() => setConfirmRemove("discord")}>
+                    Remover
+                  </button>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
               <input
                 className="field w-full"
                 type="password"
-                value={tgForm.token}
-                onChange={(e) => setTgForm({ ...tgForm, token: e.target.value })}
-                placeholder={s.hasTelegram ? "Manter token atual" : "123456789:ABCdef…"}
+                value={hook}
+                onChange={(e) => setHook(e.target.value)}
+                placeholder="https://discord.com/api/webhooks/…"
                 autoComplete="off"
                 autoFocus
               />
-            </Labeled>
-            <Labeled label="Chat ID (usuário, grupo ou @canal)" hint="Ex.: 123456789, -1001234567890 ou @meucanal">
-              <input
-                className="field w-full"
-                value={tgForm.chatId}
-                onChange={(e) => setTgForm({ ...tgForm, chatId: e.target.value })}
-                placeholder="-1001234567890"
-                autoComplete="off"
-              />
-            </Labeled>
-            <div className="flex gap-1.5">
-              <button
-                className="btn border-0 bg-poke-gold font-bold text-void hover:bg-[#f6ca5e]"
-                disabled={busy || !tgForm.chatId.trim() || (!s.hasTelegram && !tgForm.token.trim())}
-                onClick={() =>
-                  run(async () => {
-                    const payload: Record<string, unknown> = {
-                      telegram_chat_id: tgForm.chatId.trim(),
-                      telegram_enabled: true,
-                    };
-                    if (tgForm.token.trim()) payload.telegram_bot_token = tgForm.token.trim();
-                    fill(await admin.saveSettings(payload));
-                    setTgForm(null);
-                  }, "Configuração do Telegram salva.")
-                }
-              >
-                Salvar
-              </button>
-              <button className="btn" onClick={() => setTgForm(null)}>
-                Cancelar
-              </button>
+              <div className="flex gap-1.5">
+                <button
+                  className="btn border-0 bg-poke-gold font-bold text-void hover:bg-[#f6ca5e]"
+                  disabled={busy || !hook.trim()}
+                  onClick={() =>
+                    run(async () => {
+                      fill(await admin.saveSettings({ discord_webhook: hook.trim(), discord_enabled: true }));
+                      setHook(null);
+                    }, "Webhook do Discord salvo.")
+                  }
+                >
+                  Salvar
+                </button>
+                <button className="btn" onClick={() => setHook(null)}>
+                  Cancelar
+                </button>
+              </div>
             </div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-line bg-black/20 p-3.5 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-fg">Telegram (Bot)</h3>
+            <Chip on={telegramActive} label={s.hasTelegram ? (s.telegram_enabled ? "Ativo" : "Pausado") : "Desligado"} />
           </div>
-        )}
-        <p className="text-xs text-mute">
-          Você pode ativar o Discord, o Telegram ou os dois ao mesmo tempo. Avisa quedas/retornos, shinies, itens raros, sniper e o relatório diário.
-        </p>
-      </Group>
+          {s.hasTelegram && (
+            <Check2
+              checked={s.telegram_enabled}
+              onChange={(v) =>
+                run(async () => fill(await admin.saveSettings({ telegram_enabled: v })), v ? "Telegram ativado." : "Telegram pausado.")
+              }
+            >
+              Receber no Telegram{" "}
+              <span className="text-xs text-mute">
+                (Chat: {s.telegram_chat_id} · Bot: {s.telegramTokenHint})
+              </span>
+            </Check2>
+          )}
+          {tgForm === null ? (
+            <div className="flex flex-wrap gap-1.5">
+              <button className="btn" onClick={() => setTgForm({ token: "", chatId: s.telegram_chat_id || "" })}>
+                {s.hasTelegram ? "Trocar Bot / Chat ID" : "Configurar Telegram"}
+              </button>
+              {s.hasTelegram && (
+                <>
+                  <button
+                    className="btn"
+                    disabled={busy}
+                    onClick={() => run(() => admin.testWebhook("telegram").then(() => undefined), "Mensagem de teste enviada ao Telegram.")}
+                  >
+                    Enviar teste
+                  </button>
+                  <button className="btn" onClick={() => setConfirmRemove("telegram")}>
+                    Remover
+                  </button>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              <Labeled
+                label="Token do Bot (@BotFather)"
+                hint={s.hasTelegram ? `Atual: ${s.telegramTokenHint}. Deixe vazio para manter.` : "Ex.: 123456789:ABCdefGHIjklMNOpqrSTUvwxYZ"}
+              >
+                <input
+                  className="field w-full"
+                  type="password"
+                  value={tgForm.token}
+                  onChange={(e) => setTgForm({ ...tgForm, token: e.target.value })}
+                  placeholder={s.hasTelegram ? "Manter token atual" : "123456789:ABCdef…"}
+                  autoComplete="off"
+                  autoFocus
+                />
+              </Labeled>
+              <Labeled label="Chat ID (usuário, grupo ou @canal)" hint="Ex.: 123456789, -1001234567890 ou @meucanal">
+                <input
+                  className="field w-full"
+                  value={tgForm.chatId}
+                  onChange={(e) => setTgForm({ ...tgForm, chatId: e.target.value })}
+                  placeholder="-1001234567890"
+                  autoComplete="off"
+                />
+              </Labeled>
+              <div className="flex gap-1.5">
+                <button
+                  className="btn border-0 bg-poke-gold font-bold text-void hover:bg-[#f6ca5e]"
+                  disabled={busy || !tgForm.chatId.trim() || (!s.hasTelegram && !tgForm.token.trim())}
+                  onClick={() =>
+                    run(async () => {
+                      const payload: Record<string, unknown> = {
+                        telegram_chat_id: tgForm.chatId.trim(),
+                        telegram_enabled: true,
+                      };
+                      if (tgForm.token.trim()) payload.telegram_bot_token = tgForm.token.trim();
+                      fill(await admin.saveSettings(payload));
+                      setTgForm(null);
+                    }, "Configuração do Telegram salva.")
+                  }
+                >
+                  Salvar
+                </button>
+                <button className="btn" onClick={() => setTgForm(null)}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      <p className="text-xs text-mute">
+        Você pode usar o Discord, o Telegram ou os dois ao mesmo tempo. Tudo fica salvo direto no banco do painel.
+      </p>
 
       <Group
         title="Avisos do Mercado"
@@ -955,32 +967,34 @@ function GlobalForm() {
         </div>
       </Group>
 
-      <Group title="Conexão">
-        <Labeled label="Reconectar depois de abrir a conta em outro lugar" hint="Quando você entra numa conta pelo jogo ou outro aparelho, o bot espera esse tempo antes de tentar de novo, para não derrubar você. De 1 a 1440 minutos.">
-          <div className="flex items-center gap-2">
-            <input
-              className="field w-24"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={1440}
-              value={wait}
-              onChange={(e) => setWait(e.target.value)}
-              aria-label="Minutos de espera"
-            />
-            <span className="text-sm text-mute">minutos</span>
-            {Number(wait) !== s.external_login_wait_min && (
-              <button
-                className="btn ml-auto border-0 bg-poke-gold font-bold text-void hover:bg-[#f6ca5e]"
-                disabled={busy || !Number.isInteger(Number(wait)) || Number(wait) < 1 || Number(wait) > 1440}
-                onClick={() => run(async () => fill(await admin.saveSettings({ external_login_wait_min: Number(wait) })), "Tempo de espera salvo.")}
-              >
-                Salvar
-              </button>
-            )}
-          </div>
-        </Labeled>
-      </Group>
+      {!onlyNotifications && (
+        <Group title="Conexão">
+          <Labeled label="Reconectar depois de abrir a conta em outro lugar" hint="Quando você entra numa conta pelo jogo ou outro aparelho, o bot espera esse tempo antes de tentar de novo, para não derrubar você. De 1 a 1440 minutos.">
+            <div className="flex items-center gap-2">
+              <input
+                className="field w-24"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={1440}
+                value={wait}
+                onChange={(e) => setWait(e.target.value)}
+                aria-label="Minutos de espera"
+              />
+              <span className="text-sm text-mute">minutos</span>
+              {Number(wait) !== s.external_login_wait_min && (
+                <button
+                  className="btn ml-auto border-0 bg-poke-gold font-bold text-void hover:bg-[#f6ca5e]"
+                  disabled={busy || !Number.isInteger(Number(wait)) || Number(wait) < 1 || Number(wait) > 1440}
+                  onClick={() => run(async () => fill(await admin.saveSettings({ external_login_wait_min: Number(wait) })), "Tempo de espera salvo.")}
+                >
+                  Salvar
+                </button>
+              )}
+            </div>
+          </Labeled>
+        </Group>
+      )}
 
       <Group title="Relatório diário">
         <label className="flex items-center justify-between gap-3 text-sm">
@@ -995,20 +1009,22 @@ function GlobalForm() {
         </label>
       </Group>
 
-      <details className="group rounded-lg border border-line px-3 py-2.5">
-        <summary className="cursor-pointer text-sm font-semibold text-mute">Avançado</summary>
-        <div className="mt-3 space-y-3">
-          <Labeled label="Fuso horário">
-            <input className="field w-full" value={form.report_tz} onChange={(e) => setForm({ ...form, report_tz: e.target.value })} placeholder="America/Sao_Paulo" />
-          </Labeled>
-          <Labeled label="URL pública do painel" hint="Opcional. Só para mostrar o ícone do item raro no Discord.">
-            <input className="field w-full" value={form.public_url} onChange={(e) => setForm({ ...form, public_url: e.target.value })} placeholder="https://meu-dominio.exemplo" />
-          </Labeled>
-          <Labeled label="Servidor do jogo (WebSocket)" hint={`Padrão: ${s.defaultWsUrl}. Mudar reinicia as contas.`}>
-            <input className="field w-full" value={form.ws_url} onChange={(e) => setForm({ ...form, ws_url: e.target.value })} />
-          </Labeled>
-        </div>
-      </details>
+      {!onlyNotifications && (
+        <details className="group rounded-lg border border-line px-3 py-2.5">
+          <summary className="cursor-pointer text-sm font-semibold text-mute">Avançado</summary>
+          <div className="mt-3 space-y-3">
+            <Labeled label="Fuso horário">
+              <input className="field w-full" value={form.report_tz} onChange={(e) => setForm({ ...form, report_tz: e.target.value })} placeholder="America/Sao_Paulo" />
+            </Labeled>
+            <Labeled label="URL pública do painel" hint="Opcional. Só para mostrar o ícone do item raro no Discord.">
+              <input className="field w-full" value={form.public_url} onChange={(e) => setForm({ ...form, public_url: e.target.value })} placeholder="https://meu-dominio.exemplo" />
+            </Labeled>
+            <Labeled label="Servidor do jogo (WebSocket)" hint={`Padrão: ${s.defaultWsUrl}. Mudar reinicia as contas.`}>
+              <input className="field w-full" value={form.ws_url} onChange={(e) => setForm({ ...form, ws_url: e.target.value })} />
+            </Labeled>
+          </div>
+        </details>
+      )}
 
       {msg && <Notice tone={msg.ok ? "ok" : "error"}>{msg.text}</Notice>}
 

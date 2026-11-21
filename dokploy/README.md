@@ -22,16 +22,10 @@ Este projeto já está preparado para rodar no **Dokploy** atrás de um domínio
    ```text
    docker-compose.dokploy.yml
    ```
-3. Na aba **Environment** do serviço no Dokploy, adicione:
+3. Na aba **Environment** do serviço no Dokploy, adicione apenas o secret e o seu domínio (toda a configuração de contas, Discord e Telegram é feita direto pelo Dashboard web!):
    ```env
    TELEMETRY_TOKEN=seu-secret-forte-de-32-caracteres-aqui
    PUBLIC_URL=https://pokeidle.seudominio.com
-   REPORT_TZ=America/Sao_Paulo
-   DAILY_REPORT_HOUR=0
-   # Opcionais (também podem ser configurados depois pela interface web do painel):
-   DISCORD_WEBHOOK_URL=
-   TELEGRAM_BOT_TOKEN=
-   TELEGRAM_CHAT_ID=
    ```
    > **Nota:** `docker-compose.dokploy.yml` exige que `TELEMETRY_TOKEN` esteja preenchido (`${TELEMETRY_TOKEN:?...}`). Se estiver vazio, o deploy falha propositalmente para evitar que o painel suba sem senha na internet.
 4. Na aba **Domains** do Dokploy:
