@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { apiUrl, httpBase, panelKey } from "./api";
+import { httpBase, panelKey } from "./api";
 import { call } from "./admin";
 
 /**
@@ -200,45 +200,4 @@ export async function sendChat(account: string, canal: ChannelId, texto: string)
     const err = e as Error & { code?: string; wait?: number; body?: { code?: string; wait?: number } };
     throw new ChatSendError(err.message || "Não foi possível enviar.", err.code ?? err.body?.code ?? "", err.wait ?? err.body?.wait ?? 0);
   }
-}
-
-// ------------------------------------------------------------ Discord
-
-export interface Community {
-  url: string;
-  name: string | null;
-  online: number | null;
-  members: number | null;
-}
-const FALLBACK: Community = { url: "https://discord.gg/pFVashEjtH", name: null, online: null, members: null };
-let community: Community = FALLBACK;
-const cListeners = new Set<() => void>();
-let cStarted = false;
-
-/** Uma única cadeia que se reagenda sozinha: 5 min quando deu certo; logo de novo quando não leu o Discord. */
-async function loadCommunity() {
-  let next = 20_000;
-  try {
-    const r = await fetch(apiUrl("/api/community"));
-    if (r.ok) {
-      community = (await r.json()) as Community;
-      cListeners.forEach((l) => l());
-      next = community.online == null ? 60_000 : 5 * 60_000;
-    }
-  } catch {
-    /* sem números: o link continua valendo */
-  }
-  setTimeout(() => void loadCommunity(), next);
-}
-
-export function useCommunity(): Community {
-  useEffect(() => {
-    if (cStarted) return;
-    cStarted = true;
-    void loadCommunity();
-  }, []);
-  return useSyncExternalStore(
-    (l) => (cListeners.add(l), () => cListeners.delete(l)),
-    () => community,
-  );
 }

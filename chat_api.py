@@ -1,15 +1,13 @@
-"""Rotas do chat e da comunidade (Discord) do painel.
+"""Rotas do chat do painel.
 
     GET  /api/chat?canal=mundo     histórico do canal (até 200 mensagens)
     POST /api/chat/send            envia por uma conta: {account, canal, texto}
     WS   /ws/chat                  tempo real: init, chat, history, del, notice
-    GET  /api/community            Discord: online e membros (lidos do convite, cache de 5 min)
 """
 from __future__ import annotations
 
 import asyncio
 import json
-import time
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
@@ -22,9 +20,6 @@ if TYPE_CHECKING:
     from auth import Auth
     from manager import AccountManager
 
-DISCORD_INVITE = "pFVashEjtH"          # convite permanente do servidor
-DISCORD_URL = f"https://discord.gg/{DISCORD_INVITE}"
-COMMUNITY_TTL_S = 300
 PING_S = 25
 
 
@@ -36,7 +31,6 @@ class ChatSendIn(BaseModel):
 
 def register_chat_routes(app: FastAPI, manager: "AccountManager", auth: "Auth") -> None:
     hub = manager.chat
-    community: dict = {}
 
     @app.get("/api/chat")
     async def chat_history(request: Request, tok: str | None = Query(None, alias="token"), canal: str = "mundo"):
@@ -83,26 +77,3 @@ def register_chat_routes(app: FastAPI, manager: "AccountManager", auth: "Auth") 
             pass
         finally:
             hub.unsubscribe(q)
-
-    @app.get("/api/community")
-    async def community_info(request: Request, tok: str | None = Query(None, alias="token")):
-        """Contagem do Discord lida do convite (o widget do servidor está desligado). Falha = sem números, link intacto."""
-        if (denied := auth.read_guard(request, tok)):
-            return denied
-        if community.get("exp", 0) < time.time():
-            data = {"url": DISCORD_URL, "name": None, "online": None, "members": None}
-            try:
-                import aiohttp
-
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as s:
-                    async with s.get(f"https://discord.com/api/v10/invites/{DISCORD_INVITE}?with_counts=true") as r:
-                        if r.status == 200:
-                            j = json.loads(await r.text())
-                            data.update(name=(j.get("guild") or {}).get("name"),
-                                        online=j.get("approximate_presence_count"),
-                                        members=j.get("approximate_member_count"))
-            except Exception:                 # rede fora, JSON estranho...: o card segue só com o link
-                pass
-            ok = data["online"] is not None
-            community.update(exp=time.time() + (COMMUNITY_TTL_S if ok else 60), data=data)
-        return JSONResponse(community["data"], headers={"Cache-Control": "max-age=60"})

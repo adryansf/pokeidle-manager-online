@@ -6,7 +6,6 @@ import { useScrollLock } from "@/lib/scrollLock";
 import { Check, Copy, Pencil, Plus, Power, RefreshCw, Trash2, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StatusPill } from "@/components/StatusPill";
-import { SupportSection } from "@/components/SupportCard";
 import { UpdateSection } from "@/components/UpdateCard";
 import { ConfirmDialog, Reveal } from "@/components/ui";
 import {
@@ -1216,10 +1215,6 @@ export function SettingsView() {
           Você está acessando o painel por <b>HTTP</b> fora do seu computador: a chave e os tokens trafegam sem criptografia. Prefira um túnel SSH (<code>ssh -L 8080:localhost:8080 usuario@servidor</code>) ou HTTPS.
         </Notice>
       )}
-
-      <Reveal index={0}>
-        <SupportSection />
-      </Reveal>
 
       <Reveal as="section" index={1} className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">

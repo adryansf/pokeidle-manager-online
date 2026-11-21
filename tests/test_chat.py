@@ -212,16 +212,3 @@ def test_ws_sends_init_and_live_messages(env):
         mgr.chat.handle_frame(conn, msg(2, "agora"))
         ev = ws.receive_json()
         assert ev["type"] == "chat" and ev["msg"]["text"] == "agora"
-
-
-def test_community_reads_invite_and_survives_failure(env, monkeypatch):
-    c, _, _, _ = env
-
-    class Boom:
-        def __init__(self, *a, **k):
-            raise OSError("sem rede")
-
-    import aiohttp
-    monkeypatch.setattr(aiohttp, "ClientSession", Boom)
-    j = c.get("/api/community", headers=H).json()
-    assert j["url"] == "https://discord.gg/pFVashEjtH" and j["online"] is None

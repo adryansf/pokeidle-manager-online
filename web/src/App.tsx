@@ -12,8 +12,7 @@ import { PvpView } from "@/components/PvpView";
 import { NotificationsModal, SettingsView } from "@/components/SettingsView";
 import { SummaryBar } from "@/components/SummaryBar";
 import { UpdateBanner } from "@/components/UpdateCard";
-import { ChatDock, ChatPopoutHost, ChatView, CommunityColumn, CommunityStrip, useDockMode } from "@/components/Sidebars";
-import { SupportPopup, SupportStrip } from "@/components/SupportCard";
+import { ChatDock, ChatPopoutHost, ChatView, useDockMode } from "@/components/Sidebars";
 import { ConfirmDialog, Frame } from "@/components/ui";
 import { actions } from "@/lib/actions";
 import { startChat, totalUnread, useChat } from "@/lib/chat";
@@ -233,9 +232,8 @@ export default function App() {
           </LayoutGroup>
           <ConnectionIndicator />
         </div>
-        {/* A trilha dá a largura ao painel e é a âncora das colunas laterais (Comunidade à esquerda, Chat à direita). */}
+        {/* A trilha dá a largura ao painel e é a âncora da coluna lateral do Chat. */}
         <div className="frame-w relative mx-auto w-full">
-        {dock === "wide" && <CommunityColumn />}
         {dock === "wide" && <ChatDock mode="wide" />}
         <Frame>
           <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2.5 sm:gap-y-4">
@@ -350,15 +348,8 @@ export default function App() {
           </main>
         </Frame>
         </div>
-        {tab !== "config" && tab !== "chat" && (
-          <div className="frame-w mx-auto mt-3 flex w-full flex-col gap-2 min-[1800px]:hidden sm:mt-4 sm:flex-row">
-            <CommunityStrip className="flex-1" />
-            <SupportStrip />
-          </div>
-        )}
         {dock === "drawer" && <ChatDock mode="drawer" />}
         <ChatPopoutHost />
-        <SupportPopup disabled={tab === "config"} />
       </div>
 
       <nav

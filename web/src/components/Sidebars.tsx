@@ -1,13 +1,10 @@
-import { ExternalLink, MessagesSquare, PictureInPicture2, Users } from "lucide-react";
+import { MessagesSquare, PictureInPicture2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChatPanel } from "@/components/ChatPanel";
-import { CoffeeMini } from "@/components/SupportCard";
-import { useUpdate } from "@/components/UpdateCard";
-import { totalUnread, useChat, useCommunity } from "@/lib/chat";
+import { totalUnread, useChat } from "@/lib/chat";
 import { closeChatWindow, openChatWindow, popoutKind, useChatWindow } from "@/lib/popout";
 
-const REPO = "https://github.com/DiuleJR/pokeidle-manager-online";
 const HANDLE_W = 44;
 const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 /** Largura da bandeja no desktop largo: usa o espaço que sobra ao lado do painel (de 260px até 360px). */
@@ -27,87 +24,6 @@ export function useDockMode(): DockMode {
     return () => list.forEach((m) => m.removeEventListener("change", on));
   }, []);
   return mode;
-}
-
-/** O logo do Discord (glifo simples, em currentColor). */
-function DiscordMark({ className = "" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden className={className} fill="currentColor">
-      <path d="M20.3 4.4A17.5 17.5 0 0 0 16 3l-.2.4a16 16 0 0 1 3.9 1.9 14.6 14.6 0 0 0-15.4 0A16 16 0 0 1 8.2 3.4L8 3a17.5 17.5 0 0 0-4.3 1.4C1 8.500 .3 12.500.7 16.400a17.600 17.600 0 0 0 5.300 2.700l1.100-1.800a11 11 0 0 1-1.700-.8l.4-.3a12.600 12.600 0 0 0 10.400 0l.4.3a11 11 0 0 1-1.700.8l1.100 1.800a17.600 17.600 0 0 0 5.300-2.700c.5-4.500-.8-8.400-3-12zM8.900 14c-1 0-1.800-.9-1.800-2s.8-2 1.800-2 1.800.9 1.800 2-.8 2-1.800 2zm6.200 0c-1 0-1.800-.9-1.800-2s.8-2 1.800-2 1.800.9 1.800 2-.8 2-1.800 2z" />
-    </svg>
-  );
-}
-
-const nf = new Intl.NumberFormat("pt-BR");
-
-function Presence({ className = "" }: { className?: string }) {
-  const c = useCommunity();
-  if (c.online == null) return <span className={className}>Servidor da comunidade</span>;
-  return (
-    <span className={`tnum ${className}`}>
-      <span aria-hidden className="mr-1.5 inline-block size-2 rounded-full bg-poke-green align-middle" />
-      {nf.format(c.online)} online{c.members != null && <> · {nf.format(c.members)} membros</>}
-    </span>
-  );
-}
-
-/**
- * Coluna da esquerda (desktop largo): Discord, versão e o cafezinho em formato pequeno.
- * Mora numa trilha colada na esquerda do painel (position: absolute) e acompanha a rolagem (sticky), então
- * acompanha o painel em qualquer zoom e largura, sem depender de contas com a janela.
- */
-export function CommunityColumn() {
-  const c = useCommunity();
-  const current = useUpdate().data?.current;
-  const release = current ? `${REPO}/releases/tag/v${current}` : `${REPO}/releases/latest`;
-  return (
-    <aside aria-label="Comunidade" className="absolute right-full top-0 mr-4 h-full w-[260px]">
-      <div className="sticky top-20 flex flex-col gap-3 pt-2">
-        <div className="card flex flex-col gap-3 p-4">
-          <div className="flex items-center gap-1.5 text-sm font-extrabold uppercase tracking-wide text-poke-gold">
-            <Users className="size-4" aria-hidden /> Comunidade
-          </div>
-          <a
-            href={c.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group flex items-center gap-3 rounded-xl border-2 border-[#5865F2]/70 bg-[#5865F2]/15 px-3 py-3 text-fg transition-[background-color,border-color,transform] duration-200 hover:border-[#7b86f7] hover:bg-[#5865F2]/25 active:scale-[0.98]"
-          >
-            <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#5865F2] text-white">
-              <DiscordMark className="size-6" />
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-extrabold">{c.name ?? "Pokeidle Manager"}</span>
-              <Presence className="block truncate text-xs text-mute" />
-            </span>
-          </a>
-          <p className="text-xs leading-snug text-mute">Tire dúvidas, sugira ideias e saiba das atualizações no nosso Discord.</p>
-          <a href={release} target="_blank" rel="noopener noreferrer" className="btn w-full">
-            <ExternalLink className="size-4 shrink-0" aria-hidden />
-            <span className="truncate">{current ? `Novidades da v${current}` : "Novidades da versão"}</span>
-          </a>
-        </div>
-        <CoffeeMini />
-      </div>
-    </aside>
-  );
-}
-
-/** Linha do Discord para telas sem a coluna lateral (fica ao lado do convite de apoio). */
-export function CommunityStrip({ className = "" }: { className?: string }) {
-  const c = useCommunity();
-  return (
-    <a
-      href={c.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`flex items-center justify-center gap-2 rounded-xl border border-[#5865F2]/60 bg-[#5865F2]/10 px-3 py-2 text-xs font-semibold text-fg transition-colors hover:border-[#7b86f7] hover:bg-[#5865F2]/20 sm:text-sm ${className}`}
-    >
-      <DiscordMark className="size-4 shrink-0 text-[#8b95ff]" />
-      <span className="truncate">Entrar no Discord</span>
-      <Presence className="hidden truncate text-xs text-mute sm:inline" />
-    </a>
-  );
 }
 
 function Handle({ open, onClick, side }: { open: boolean; onClick: () => void; side: "right" | "left" }) {

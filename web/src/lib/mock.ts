@@ -368,7 +368,6 @@ function installMockApi(accs: AccountSnapshot[]) {
       pvpAuto.fill(JSON.parse(String(init.body)).on);
       return json({ ok: true, accounts: 4 });
     }
-    if (path === "/api/community") return json({ url: "https://discord.gg/pFVashEjtH", name: "Pokeidle Manager", online: 8, members: 32 });
     if (path === "/api/chat/send" && init?.method === "POST") {
       await wait();
       const b = JSON.parse(String(init.body)) as { account: number; canal: string; texto: string };
