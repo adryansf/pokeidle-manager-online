@@ -908,6 +908,13 @@ class AccountConnection:
         if not candidates:
             return None
 
+        # Se o simulador completo do Mapa já calculou a melhor hunt para a prioridade/região atual, usa ela!
+        sim_slug = (self.acc.auto_best_hunt_slug or "").strip()
+        if sim_slug:
+            matched = next((h for h in candidates if h.get("slug") == sim_slug), None)
+            if matched is not None:
+                return matched
+
         if region_filter == "all":
             if priority == "fragmento":
                 outland_only = [h for h in candidates if (region_of_hunt(h) or "").lower() == "outland"]
@@ -973,6 +980,30 @@ class AccountConnection:
         self._auto_pass_claiming = True
         await self.claim_pass()
         log.info("[%s] Auto-Passe: resgate diário enviado automaticamente", self.acc.name)
+
+    async def set_auto_colecao(self, regra: dict) -> None:
+        """Cliente → Servidor: shop.autoColecao (salva critérios de Auto-Coleção e aplica no Depot)."""
+        await self.send_frame({"t": "shop.autoColecao", "regra": regra})
+        auto = self.estado.setdefault("automation", {})
+        if isinstance(auto, dict):
+            auto["autoColecao"] = regra
+        log.info("[%s] shop.autoColecao enviado", self.acc.name)
+
+    async def move_collection(self, pokemon_id: int, target: str) -> None:
+        """Cliente → Servidor: colecao.mover ('colecao' ou 'depot')."""
+        para = "colecao" if target == "colecao" else "depot"
+        pid = int(pokemon_id)
+        await self.send_frame({"t": "colecao.mover", "pokemonId": pid, "para": para})
+        auto = self.estado.setdefault("automation", {})
+        if isinstance(auto, dict):
+            locked = [int(x) for x in (auto.get("pokemonTravado") or []) if isinstance(x, (int, float))]
+            if para == "colecao":
+                if pid not in locked:
+                    locked.append(pid)
+            else:
+                locked = [x for x in locked if x != pid]
+            auto["pokemonTravado"] = locked
+        log.info("[%s] colecao.mover pokemonId=%s para=%s", self.acc.name, pid, para)
 
     async def set_active_pokemon(self, pokemon_id: int) -> None:
         """Cliente → Servidor: team.active (troca qual Pokémon da equipe fica ativo)."""

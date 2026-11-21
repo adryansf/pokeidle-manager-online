@@ -193,6 +193,7 @@ export type AutomationPatch = Partial<{
   autoBestHunt: boolean;
   autoBestHuntRegion: string;
   autoBestHuntPriority: "xp" | "xpTreinador" | "ouro" | "shiny" | "fragmento" | string;
+  autoBestHuntSlug: string;
   autoPassClaim: boolean;
   gameAutoPotion: boolean;
   gameAutoRevive: boolean;
@@ -229,6 +230,10 @@ export const actions = {
     call<{ ok: boolean; method?: string }>("POST", `/api/accounts/${numId(accId)}/center`, force ? { force } : {}),
   setAutomation: (accId: string, patch: AutomationPatch) =>
     call<{ ok: boolean; automation: import("./types").AccountAutomation }>("POST", `/api/accounts/${numId(accId)}/automation`, patch),
+  setAutoColecao: (accId: string, regra: import("./types").AutoColecaoRule) =>
+    call<{ ok: boolean; regra: import("./types").AutoColecaoRule }>("POST", `/api/accounts/${numId(accId)}/auto-colecao`, { regra }),
+  moveCollection: (accId: string, pokemonId: number, to: "colecao" | "depot") =>
+    call<{ ok: boolean; pokemonId: number; to: "colecao" | "depot" }>("POST", `/api/accounts/${numId(accId)}/collection/move`, { pokemonId, to }),
   captures: (opts?: { account?: string; onlyCaught?: boolean; onlyShiny?: boolean; limit?: number }) => {
     const q = new URLSearchParams();
     if (opts?.account && opts.account !== "all") q.set("account", opts.account);

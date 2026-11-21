@@ -20,6 +20,7 @@ import { ItemSprite, PokemonSprite, ShinyMark } from "@/components/Sprites";
 import { StatusPill } from "@/components/StatusPill";
 import { AnimatedNumber, Coin } from "@/components/ui";
 import { actions, useHuntCatalog, type AutomationPatch } from "@/lib/actions";
+import { computeBestHuntSlug, type HuntOrder } from "@/lib/huntAdvisor";
 import { usePokemons } from "@/lib/api";
 import { accountNumber, useSheet } from "@/lib/sheet";
 import { serverNow, useAccount } from "@/lib/telemetry";
@@ -925,12 +926,25 @@ export function AccountDetailModal({
                                 setBusyKey("autoBestHuntRegion");
                                 setMsg(null);
                                 try {
+                                  const sim = acc.status === "online"
+                                    ? await computeBestHuntSlug(
+                                        accId,
+                                        autoDraft.autoBestHuntPriority as HuntOrder,
+                                        autoDraft.autoBestHuntRegion,
+                                      ).catch(() => null)
+                                    : null;
                                   await actions.setAutomation(accId, {
                                     autoBestHunt: true,
                                     autoBestHuntRegion: autoDraft.autoBestHuntRegion,
                                     autoBestHuntPriority: autoDraft.autoBestHuntPriority,
+                                    ...(sim?.slug ? { autoBestHuntSlug: sim.slug } : {}),
                                   });
-                                  setMsg({ tone: "ok", text: "Auto-Melhor Hunt atualizado e ativado!" });
+                                  setMsg({
+                                    tone: "ok",
+                                    text: sim?.nome
+                                      ? `Auto-Hunt ativado! Melhor hunt calculada: ${sim.nome}.`
+                                      : "Auto-Melhor Hunt atualizado e ativado!",
+                                  });
                                 } catch (e) {
                                   setMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao atualizar Auto-Hunt" });
                                 } finally {

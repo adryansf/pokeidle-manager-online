@@ -72,6 +72,15 @@ class ActivePokemonIn(BaseModel):
     pokemonId: int
 
 
+class CollectionMoveIn(BaseModel):
+    pokemonId: int
+    to: Literal["colecao", "depot"]
+
+
+class AutoColecaoIn(BaseModel):
+    regra: dict
+
+
 class AutomationPatchIn(BaseModel):
     autoCatch: bool | None = None
     autoPotion: bool | None = None
@@ -92,6 +101,7 @@ class AutomationPatchIn(BaseModel):
     autoBestHunt: bool | None = None
     autoBestHuntRegion: str | None = None
     autoBestHuntPriority: str | None = None
+    autoBestHuntSlug: str | None = None
     autoPassClaim: bool | None = None
     gameAutoPotion: bool | None = None
     gameAutoRevive: bool | None = None
@@ -618,6 +628,36 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
                 return {"ok": True, "confirmed": True, "pokemonId": body.pokemonId}
         return {"ok": True, "confirmed": False, "pokemonId": body.pokemonId}
 
+    @app.post("/api/accounts/{acc_id}/auto-colecao")
+    async def set_auto_colecao(acc_id: int, body: AutoColecaoIn, request: Request,
+                               tok: str | None = Query(None, alias="token")):
+        """Salva critérios de Auto-Coleção diretamente no jogo (shop.autoColecao)."""
+        if (r := guard(request, tok)):
+            return r
+        conn = conn_of(acc_id)
+        if conn is None:
+            return JSONResponse({"error": "conta não encontrada ou desligada"}, status_code=404)
+        if not conn.can_send:
+            return JSONResponse({"error": "A conta está offline."}, status_code=409)
+        from telemetry import _normalize_auto_colecao
+        regra = _normalize_auto_colecao({"autoColecao": body.regra})
+        await conn.set_auto_colecao(regra)
+        return {"ok": True, "regra": regra}
+
+    @app.post("/api/accounts/{acc_id}/collection/move")
+    async def move_collection(acc_id: int, body: CollectionMoveIn, request: Request,
+                              tok: str | None = Query(None, alias="token")):
+        """Move um Pokémon entre Coleção e Depot (colecao.mover)."""
+        if (r := guard(request, tok)):
+            return r
+        conn = conn_of(acc_id)
+        if conn is None:
+            return JSONResponse({"error": "conta não encontrada ou desligada"}, status_code=404)
+        if not conn.can_send:
+            return JSONResponse({"error": "A conta está offline."}, status_code=409)
+        await conn.move_collection(int(body.pokemonId), body.to)
+        return {"ok": True, "pokemonId": int(body.pokemonId), "to": body.to}
+
     @app.post("/api/accounts/{acc_id}/automation")
     async def toggle_automation(acc_id: int, body: AutomationPatchIn, request: Request,
                                 tok: str | None = Query(None, alias="token")):
@@ -692,11 +732,22 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
         if "autoBestHuntRegion" in sent and body.autoBestHuntRegion is not None:
             reg = (body.autoBestHuntRegion or "all").strip().lower() or "all"
             opts["auto_best_hunt_region"] = acc_changes["auto_best_hunt_region"] = reg
+            if "autoBestHuntSlug" not in sent:
+                opts["auto_best_hunt_slug"] = ""
+                acc_changes["auto_best_hunt_slug"] = None
             conn._last_auto_hunt_at = 0.0
         if "autoBestHuntPriority" in sent and body.autoBestHuntPriority is not None:
             raw_p = (body.autoBestHuntPriority or "xp").strip()
             prio = raw_p if raw_p in {"xp", "xpTreinador", "ouro", "shiny", "fragmento"} else "xp"
             opts["auto_best_hunt_priority"] = acc_changes["auto_best_hunt_priority"] = prio
+            if "autoBestHuntSlug" not in sent:
+                opts["auto_best_hunt_slug"] = ""
+                acc_changes["auto_best_hunt_slug"] = None
+            conn._last_auto_hunt_at = 0.0
+        if "autoBestHuntSlug" in sent and body.autoBestHuntSlug is not None:
+            sim_slug = (body.autoBestHuntSlug or "").strip()
+            opts["auto_best_hunt_slug"] = sim_slug
+            acc_changes["auto_best_hunt_slug"] = sim_slug or None
             conn._last_auto_hunt_at = 0.0
         if "autoPassClaim" in sent and body.autoPassClaim is not None:
             opts["auto_pass_claim"] = acc_changes["auto_pass_claim"] = bool(body.autoPassClaim)

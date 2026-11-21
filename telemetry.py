@@ -100,17 +100,104 @@ def ball_rows(c: "AccountConnection") -> list[dict]:
     return [{"id": i, "name": n, "qty": q, "icon": _abs(BALL_ICONS.get(i))} for i, n, q in c.inventory.balls()]
 
 
+def _collection_ids(est: dict) -> set[int]:
+    auto = est.get("automation") if isinstance(est.get("automation"), dict) else {}
+    out: set[int] = set()
+    for x in auto.get("pokemonTravado") or []:
+        try:
+            out.add(int(x))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+_IV_STATS = ("hp", "atk", "def", "spa", "spd", "spe")
+
+
+def _normalize_auto_colecao(auto: dict) -> dict:
+    """Espelha `autoColecaoEfetiva` de shared/auto-colecao.mjs (7 critérios oficiais)."""
+    raw = auto.get("autoColecao") if isinstance(auto.get("autoColecao"), dict) else None
+    cfg = {
+        "lendario": {"on": True},
+        "shiny": {"on": True},
+        "pot": {"on": True, "min": 4},
+        "qual": {"on": False, "min": 1.5},
+        "iv": {"on": False, "min": {s: 0 for s in _IV_STATS}},
+        "nota": {"on": False, "min": 3.5},
+        "potencial": {"on": False},
+    }
+    if raw is None:
+        cfg["nota"]["on"] = bool(auto.get("autoLockNota9", False))
+        try:
+            n = float(auto.get("autoLockNotaMin"))
+            if 0 <= n <= 10:
+                cfg["nota"]["min"] = round(n, 3)
+        except (TypeError, ValueError):
+            pass
+        return cfg
+
+    for key in ("lendario", "shiny", "potencial"):
+        v = raw.get(key)
+        if isinstance(v, dict) and isinstance(v.get("on"), bool):
+            cfg[key]["on"] = v["on"]
+    v = raw.get("pot")
+    if isinstance(v, dict):
+        if isinstance(v.get("on"), bool):
+            cfg["pot"]["on"] = v["on"]
+        if v.get("min") in (2, 3, 4, 5):
+            cfg["pot"]["min"] = int(v["min"])
+    v = raw.get("qual")
+    if isinstance(v, dict):
+        if isinstance(v.get("on"), bool):
+            cfg["qual"]["on"] = v["on"]
+        try:
+            q = round(float(v.get("min")), 1)
+            if q in (1.1, 1.3, 1.5, 1.6):
+                cfg["qual"]["min"] = q
+        except (TypeError, ValueError):
+            pass
+    v = raw.get("nota")
+    if isinstance(v, dict):
+        if isinstance(v.get("on"), bool):
+            cfg["nota"]["on"] = v["on"]
+        try:
+            n = float(v.get("min"))
+            if 0 <= n <= 10:
+                cfg["nota"]["min"] = round(n, 3)
+        except (TypeError, ValueError):
+            pass
+    v = raw.get("iv")
+    if isinstance(v, dict):
+        if isinstance(v.get("on"), bool):
+            cfg["iv"]["on"] = v["on"]
+        mins = v.get("min")
+        if isinstance(mins, dict):
+            for s in _IV_STATS:
+                try:
+                    iv_val = int(mins.get(s, 0))
+                    if 0 <= iv_val <= 31:
+                        cfg["iv"]["min"][s] = iv_val
+                except (TypeError, ValueError):
+                    pass
+    return cfg
+
+
 def pokemon_rows(c: "AccountConnection") -> list[dict]:
     """Lista compacta de Pokémons da conta (servida sob demanda em /api/pokemons)."""
     acc_id = f"acc{c.acc.index}"
+    locked = _collection_ids(c.estado)
     rows = []
     for p in c.inventory.pokemons():
         ivs = p.get("ivs") or {}
+        pid = p.get("id")
+        in_col = isinstance(pid, int) and pid in locked
         rows.append({
-            "id": p.get("id"), "account": acc_id, "speciesId": p.get("speciesId"),
+            "id": pid, "account": acc_id, "speciesId": p.get("speciesId"),
             "name": p.get("nome"), "types": p.get("tipos") or [], "level": p.get("level"),
             "shiny": bool(p.get("shiny")), "quality": p.get("quality"), "power": p.get("poder"),
             "grade": p.get("nota"), "slot": p.get("slot"), "ivTotal": sum(v for v in ivs.values() if isinstance(v, (int, float))),
+            "ivs": {s: int(ivs.get(s) or 0) for s in _IV_STATS} if isinstance(ivs, dict) else None,
+            "inCollection": in_col,
             "caughtAt": p.get("caughtAt"), "looktype": look_of(p), "potency": p.get("potencia"),
         })
     return rows
@@ -278,7 +365,10 @@ def _automation_snapshot(c: "AccountConnection") -> dict:
         "autoBestHunt": bool(c.acc.auto_best_hunt),
         "autoBestHuntRegion": c.acc.auto_best_hunt_region or "all",
         "autoBestHuntPriority": c.acc.auto_best_hunt_priority or "xp",
+        "autoBestHuntSlug": c.acc.auto_best_hunt_slug or "",
         "autoPassClaim": bool(c.acc.auto_pass_claim),
+        "autoColecao": _normalize_auto_colecao(auto),
+        "collectionCount": len(_collection_ids(c.estado)),
         "gameAutoPotion": bool(auto.get("autoPotion", True)),
         "gameAutoRevive": bool(auto.get("autoRevive", False)),
         "autoVoltarHunt": bool(auto.get("autoVoltarHunt", False)),

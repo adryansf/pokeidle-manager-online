@@ -9,6 +9,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { XpMedallion, XpRace, XpSpark, XpVersus } from "@/components/XpMeters";
 import { AnimatedNumber, Coin, GoldPerHourIcon } from "@/components/ui";
 import { actions, type AutomationPatch } from "@/lib/actions";
+import { computeBestHuntSlug, type HuntOrder } from "@/lib/huntAdvisor";
 import { accountNumber, useSheet } from "@/lib/sheet";
 import { serverNow, useAccount } from "@/lib/telemetry";
 import type { EquippedItem } from "@/lib/types";
@@ -844,7 +845,17 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
                 e.stopPropagation();
                 if (autoBusy) return;
                 setAutoBusy("farmPause");
-                void actions.farmPause(id, false).finally(() => setAutoBusy(null));
+                void (async () => {
+                  if (acc.automation?.autoBestHunt && acc.status === "online") {
+                    const prio = (acc.automation.autoBestHuntPriority || "xp") as HuntOrder;
+                    const reg = acc.automation.autoBestHuntRegion || "all";
+                    const sim = await computeBestHuntSlug(id, prio, reg).catch(() => null);
+                    if (sim?.slug && sim.slug !== acc.automation.autoBestHuntSlug) {
+                      await actions.setAutomation(id, { autoBestHuntSlug: sim.slug }).catch(() => {});
+                    }
+                  }
+                  await actions.farmPause(id, false);
+                })().finally(() => setAutoBusy(null));
               }}
               className="rounded border border-[#2f6b3a] bg-[#16301c] px-2 py-0.5 text-[11px] font-bold text-poke-green hover:bg-[#1e4226] disabled:opacity-50"
             >

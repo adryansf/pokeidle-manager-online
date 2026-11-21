@@ -41,6 +41,16 @@ export interface TeamPokemon {
   ivTotal?: number;
 }
 
+export interface AutoColecaoRule {
+  lendario: { on: boolean };
+  shiny: { on: boolean };
+  pot: { on: boolean; min: number };
+  qual: { on: boolean; min: number };
+  iv: { on: boolean; min: Record<"hp" | "atk" | "def" | "spa" | "spd" | "spe", number> };
+  nota: { on: boolean; min: number };
+  potencial: { on: boolean };
+}
+
 export interface AccountAutomation {
   autoCatch: boolean;
   autoPotion: boolean;
@@ -62,7 +72,10 @@ export interface AccountAutomation {
   autoBestHunt?: boolean;
   autoBestHuntRegion?: string;
   autoBestHuntPriority?: "xp" | "xpTreinador" | "ouro" | "shiny" | "fragmento" | string;
+  autoBestHuntSlug?: string;
   autoPassClaim?: boolean;
+  autoColecao?: AutoColecaoRule;
+  collectionCount?: number;
   gameAutoPotion: boolean;
   gameAutoRevive?: boolean;
   autoVoltarHunt?: boolean;
@@ -199,6 +212,8 @@ export interface PokemonRow {
   grade: number | null;
   slot: number | null;
   ivTotal: number;
+  ivs?: Record<string, number> | null;
+  inCollection?: boolean;
   caughtAt: number | null;
   looktype?: number | null;
   /** Potência (1 a 5). */

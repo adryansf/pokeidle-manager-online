@@ -1,9 +1,10 @@
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from "framer-motion";
-import { Bell, Globe, Layers, LayoutDashboard, Map as MapIcon, MessagesSquare, Package, RotateCcw, Settings, Store, Swords, Target, Ticket } from "lucide-react";
+import { Bell, BookmarkCheck, Globe, Layers, LayoutDashboard, Map as MapIcon, MessagesSquare, Package, RotateCcw, Settings, Store, Swords, Target, Ticket } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccountCard, type CardDrag, type CardMode } from "@/components/AccountCard";
 import { BulkActionsModal } from "@/components/BulkActionsModal";
 import { CapturesView } from "@/components/CapturesView";
+import { CollectionView } from "@/components/CollectionView";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { AccountSelect, InventoryView } from "@/components/InventoryView";
 import { MapaView } from "@/components/MapaView";
@@ -19,13 +20,15 @@ import { ConfirmDialog, Frame } from "@/components/ui";
 import { actions } from "@/lib/actions";
 import { admin } from "@/lib/admin";
 import { startChat, totalUnread, useChat } from "@/lib/chat";
+import { computeBestHuntSlug, type HuntOrder } from "@/lib/huntAdvisor";
 import { useAccountIds, useAccountsMap } from "@/lib/telemetry";
 import { useCardOrder } from "@/lib/useCardOrder";
 
-type Tab = "dashboard" | "inventario" | "capturas" | "mapa" | "mercado" | "passe" | "pvp" | "config" | "chat";
+type Tab = "dashboard" | "inventario" | "colecao" | "capturas" | "mapa" | "mercado" | "passe" | "pvp" | "config" | "chat";
 const TABS: { id: Tab; label: string; Icon: typeof Package }[] = [
   { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
   { id: "inventario", label: "Inventários", Icon: Package },
+  { id: "colecao", label: "Coleção", Icon: BookmarkCheck },
   { id: "capturas", label: "Capturas", Icon: Target },
   { id: "mapa", label: "Mapa", Icon: MapIcon },
   { id: "mercado", label: "Mercado", Icon: Store },
@@ -33,9 +36,9 @@ const TABS: { id: Tab; label: string; Icon: typeof Package }[] = [
   { id: "pvp", label: "PVP", Icon: Swords },
   { id: "config", label: "Configurações", Icon: Settings },
 ];
-/** Barra de baixo do celular, em duas fileiras: Mapa, Mercado, Capturas, PVP e Chat; Dashboard, Inventários, Passe e Configurações. */
+/** Barra de baixo do celular, em duas fileiras. */
 const MOBILE_TABS: { id: Tab; label: string; Icon: typeof Package }[] = [
-  ...(["mapa", "mercado", "capturas"] as Tab[]).map((id) => TABS.find((t) => t.id === id)!),
+  ...(["mapa", "colecao", "mercado"] as Tab[]).map((id) => TABS.find((t) => t.id === id)!),
   { id: "chat", label: "Chat", Icon: MessagesSquare },
   ...(["dashboard", "inventario", "pvp", "config"] as Tab[]).map((id) => TABS.find((t) => t.id === id)!),
 ];
@@ -46,8 +49,8 @@ const MODES: { id: CardMode; label: string }[] = [
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 const readTab = (): Tab =>
-  location.hash === "#inventario" ? "inventario" : location.hash === "#capturas" ? "capturas" : location.hash === "#mapa" ? "mapa" : location.hash === "#mercado" ? "mercado" : location.hash === "#passe" ? "passe" : location.hash === "#pvp" ? "pvp" : location.hash === "#config" ? "config" : location.hash === "#chat" ? "chat" : "dashboard";
-const TITLES: Record<Tab, string> = { dashboard: "Painel de Contas", inventario: "Inventários", capturas: "Histórico de Capturas", mapa: "Mapa", mercado: "Mercado", passe: "Passe de Batalha", pvp: "PVP", config: "Configurações", chat: "Chat" };
+  location.hash === "#inventario" ? "inventario" : location.hash === "#colecao" ? "colecao" : location.hash === "#capturas" ? "capturas" : location.hash === "#mapa" ? "mapa" : location.hash === "#mercado" ? "mercado" : location.hash === "#passe" ? "passe" : location.hash === "#pvp" ? "pvp" : location.hash === "#config" ? "config" : location.hash === "#chat" ? "chat" : "dashboard";
+const TITLES: Record<Tab, string> = { dashboard: "Painel de Contas", inventario: "Inventários", colecao: "Coleção", capturas: "Histórico de Capturas", mapa: "Mapa", mercado: "Mercado", passe: "Passe de Batalha", pvp: "PVP", config: "Configurações", chat: "Chat" };
 
 function UnreadBadge() {
   const u = totalUnread(useChat());
@@ -211,6 +214,35 @@ export default function App() {
   const accounts = useAccountsMap();
   const online = ids.filter((i) => accounts[i]?.status === "online").length;
 
+  // Sincroniza o Auto-Hunt das contas online com o simulador real do Mapa (hunt-worker.js),
+  // garantindo que "Retomar farm" e trocas automáticas levem exatamente para a #1 do Mapa.
+  const syncedSigRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    let alive = true;
+    for (const id of ids) {
+      const a = accounts[id];
+      if (!a || a.status !== "online" || !a.automation?.autoBestHunt) continue;
+      const prio = (a.automation.autoBestHuntPriority || "xp") as HuntOrder;
+      const reg = a.automation.autoBestHuntRegion || "all";
+      const sig = `${a.pokemon?.id ?? ""}|${a.pokemon?.level ?? ""}|${a.level}|${prio}|${reg}`;
+      if (syncedSigRef.current[id] === sig && a.automation.autoBestHuntSlug) continue;
+      syncedSigRef.current[id] = sig;
+      void computeBestHuntSlug(id, prio, reg)
+        .then((res) => {
+          if (!alive || !res?.slug) return;
+          if (res.slug !== a.automation?.autoBestHuntSlug) {
+            void actions.setAutomation(id, { autoBestHuntSlug: res.slug });
+          }
+        })
+        .catch(() => {
+          delete syncedSigRef.current[id];
+        });
+    }
+    return () => {
+      alive = false;
+    };
+  }, [ids, accounts]);
+
   useEffect(() => {
     const on = () => setTab(readTab());
     window.addEventListener("hashchange", on);
@@ -337,7 +369,7 @@ export default function App() {
                       </button>
                     </div>
                   </motion.div>
-                ) : tab === "inventario" ? (
+                ) : tab === "inventario" || tab === "colecao" ? (
                   <motion.div key="acc" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2, ease: EASE }}>
                     <AccountSelect value={account} onChange={setAccount} />
                   </motion.div>
@@ -387,7 +419,7 @@ export default function App() {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.25, ease: EASE }}
               >
-                {tab === "dashboard" ? <Dashboard mode={mode} /> : tab === "inventario" ? <InventoryView account={account} /> : tab === "capturas" ? <CapturesView /> : tab === "mapa" ? <MapaView /> : tab === "mercado" ? <MarketView /> : tab === "passe" ? <PassView /> : tab === "pvp" ? <PvpView /> : tab === "chat" ? <ChatView /> : <SettingsView />}
+                {tab === "dashboard" ? <Dashboard mode={mode} /> : tab === "inventario" ? <InventoryView account={account} /> : tab === "colecao" ? <CollectionView account={account} /> : tab === "capturas" ? <CapturesView /> : tab === "mapa" ? <MapaView /> : tab === "mercado" ? <MarketView /> : tab === "passe" ? <PassView /> : tab === "pvp" ? <PvpView /> : tab === "chat" ? <ChatView /> : <SettingsView />}
               </motion.div>
             </AnimatePresence>
           </main>

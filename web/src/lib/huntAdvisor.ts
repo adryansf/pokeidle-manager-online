@@ -237,3 +237,32 @@ export function useBestHunts(
 
   return { data, error, loading, reload };
 }
+
+/** Calcula a melhor hunt #1 usando o mesmo simulador do Mapa (hunt-worker.js) para sincronizar com o Auto-Hunt. */
+export async function computeBestHuntSlug(
+  accId: string,
+  priority: HuntOrder = "xp",
+  region: string = "all",
+): Promise<{ slug: string; nome: string } | null> {
+  const sheet = await actions.sheet(accId);
+  const key = keyOf(sheet);
+  let out = cache.get(key);
+  if (!out) {
+    const r = await run({ sheet, nivelTreinador: sheet.trainerLevel });
+    out = {
+      sheet,
+      lines: r.linhas,
+      versao: r.versao,
+      bolas: r.bolas ?? [],
+      fragmento: r.fragmento ?? { nivelMin: 5000, porOvo: 10, horasChoca: 48 },
+      captura: r.captura ?? null,
+    };
+    cache.set(key, out);
+    if (cache.size > 20) cache.delete(cache.keys().next().value as string);
+  }
+  const reg = region && region !== "all" ? region : "";
+  const safe = rankLines(out.lines, priority, { region: reg, safety: "no_death", onlyOpen: true });
+  const ranked = safe.length > 0 ? safe : rankLines(out.lines, priority, { region: reg, safety: "all", onlyOpen: true });
+  const top = ranked[0];
+  return top ? { slug: top.slug, nome: top.nome } : null;
+}
