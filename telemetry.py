@@ -286,6 +286,112 @@ def _automation_snapshot(c: "AccountConnection") -> dict:
     }
 
 
+BOOST_META: dict[str, tuple[str, str]] = {
+    "xp": ("XP Boost", "/assets/site/assets/loja/exp.png"),
+    "pokexp": ("XP Pokémon", "/assets/site/assets/loja/boost.png"),
+    "loot": ("Loot Boost", "/assets/site/assets/loja/loot.png"),
+    "captura": ("Capture Boost", "/assets/site/assets/loja/catch.png"),
+    "shiny": ("Shiny Lure", "/assets/site/assets/loja/shinysecretlure.png"),
+    "vip": ("VIP", "/assets/site/assets/loja/vip.png"),
+}
+
+
+def _fmt_mult(m) -> str | None:
+    try:
+        v = float(m)
+    except (TypeError, ValueError):
+        return None
+    if v <= 1.0001:
+        return None
+    return f"×{int(v)}" if v == int(v) else f"×{v:.2f}".rstrip("0").rstrip(".")
+
+
+def _boosts_snapshot(c: "AccountConnection") -> list[dict]:
+    """Boosts ativos na conta agora (loja, VIP, guild, Twitch/Kick, evento, Atrasados)."""
+    est = c.estado
+    now = c.server_now_ms() or int(est.get("servidorAgora") or 0) or int(time.time() * 1000)
+    loja = est.get("loja") if isinstance(est.get("loja"), dict) else {}
+    tipos = getattr(c, "tipos_boost", {}) or {}
+    out: list[dict] = []
+
+    # 1. Boosts da Loja (xp, pokexp, loot, captura, shiny, etc.)
+    boosts_map = loja.get("boosts") if isinstance(loja.get("boosts"), dict) else {}
+    for key, exp in boosts_map.items():
+        if not isinstance(exp, (int, float)) or exp <= now:
+            continue
+        k = str(key)
+        meta_name, meta_icon = BOOST_META.get(k, (k.capitalize(), None))
+        tb = tipos.get(k) or {}
+        name = tb.get("nome") or tb.get("name") or meta_name
+        mult = _fmt_mult(tb.get("mult"))
+        out.append({
+            "key": k,
+            "name": name,
+            "detail": mult,
+            "expiresAt": int(exp),
+            "icon": _abs(meta_icon) if meta_icon else None,
+        })
+
+    # 2. VIP
+    vip_ate = loja.get("vipAte")
+    if isinstance(vip_ate, (int, float)) and vip_ate > now:
+        out.append({
+            "key": "vip",
+            "name": "VIP",
+            "detail": "×1.5 XP",
+            "expiresAt": int(vip_ate),
+            "icon": _abs(BOOST_META["vip"][1]),
+        })
+
+    # 3. Boost da Guild & Ranking da Guild
+    guild = est.get("guild") if isinstance(est.get("guild"), dict) else {}
+    guild_boost = guild.get("boostAte")
+    if isinstance(guild_boost, (int, float)) and guild_boost > now:
+        out.append({"key": "guild", "name": "Boost Guild", "detail": None, "expiresAt": int(guild_boost), "icon": None})
+    guild_pct = est.get("guildBonusPct")
+    if isinstance(guild_pct, (int, float)) and guild_pct > 0:
+        out.append({"key": "guildRank", "name": "Rank Guild", "detail": f"+{round(guild_pct)}% XP", "expiresAt": None, "icon": None})
+
+    # 4. Twitch / Kick
+    for key, label in (("twitch", "Twitch"), ("kick", "Kick")):
+        live = est.get(key) if isinstance(est.get(key), dict) else None
+        bonus = live.get("bonus") if isinstance(live, dict) and isinstance(live.get("bonus"), dict) else None
+        exp = bonus.get("xp") if bonus else None
+        if isinstance(exp, (int, float)) and exp > now:
+            pct = live.get("pct")
+            detail = f"+{round(pct)}% XP" if isinstance(pct, (int, float)) and pct > 0 else None
+            out.append({"key": key, "name": label, "detail": detail, "expiresAt": int(exp), "icon": None})
+
+    # 5. Evento do servidor
+    ev = est.get("evento") if isinstance(est.get("evento"), dict) else None
+    if ev and isinstance(ev.get("terminaEm"), (int, float)) and ev["terminaEm"] > now:
+        tr = int(ev.get("xpTreinadorPct") or 0)
+        pk = int(ev.get("xpPokemonPct") or 0)
+        pct = max(tr, pk)
+        out.append({
+            "key": "evento",
+            "name": "Evento",
+            "detail": f"+{pct}% XP" if pct > 0 else None,
+            "expiresAt": int(ev["terminaEm"]),
+            "icon": None,
+        })
+
+    # 6. Boost dos Atrasados
+    at = loja.get("atrasados") if isinstance(loja.get("atrasados"), dict) else None
+    lvl = int(est.get("level") or 0)
+    if at and isinstance(at.get("mult"), (int, float)) and at["mult"] > 1 and lvl < int(at.get("alvo") or 0):
+        mult = _fmt_mult(at["mult"])
+        out.append({
+            "key": "atrasados",
+            "name": "Atrasados",
+            "detail": f"{mult} (até Nv.{int(at['alvo'])})" if mult else f"até Nv.{int(at['alvo'])}",
+            "expiresAt": None,
+            "icon": None,
+        })
+
+    return out
+
+
 def account_snapshot(c: "AccountConnection", proxy_names: dict[tuple, str] | None = None) -> dict:
     from inventory import POTION_NAMES  # evita ciclo em import-time
 
@@ -328,6 +434,7 @@ def account_snapshot(c: "AccountConnection", proxy_names: dict[tuple, str] | Non
         "xp": {"atual": est.get("xp"), "nivel": est.get("xpNivel"), "proximo": est.get("xpProximo")},
         "hunt": {"slug": s.slug, "kills": s.kills, "minutes": round(s.elapsed_h * 60, 1)} if s else None,
         "vip": (est.get("loja") or {}).get("vipAte", 0) > (est.get("servidorAgora") or 0),
+        "boosts": _boosts_snapshot(c),
         "huntName": s.nome if s else None,
         "map": _map_info(c, slug),
         "pass": passe_publico(est.get("passe")),

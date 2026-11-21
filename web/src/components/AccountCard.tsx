@@ -15,7 +15,7 @@ import type { EquippedItem } from "@/lib/types";
 import { type CardStyle, useCardStyle } from "@/lib/cardStyle";
 import { dragState, justDragged } from "@/lib/useCardOrder";
 import { fmtDuration, fmtShort } from "@/lib/utils";
-import type { AccountLocation, MapInfo, ProxyBadgeInfo } from "@/lib/types";
+import type { AccountLocation, ActiveBoost, MapInfo, ProxyBadgeInfo } from "@/lib/types";
 
 export type CardMode = "resumo" | "sessao";
 
@@ -96,6 +96,60 @@ function Tile({
       <div className="label hidden sm:block">{label}</div>
       <div className="min-w-0 truncate text-sm font-bold leading-tight sm:text-lg">{children}</div>
     </motion.div>
+  );
+}
+
+/** Formata o tempo restante de um boost (ex.: "3d 4h", "2h 15m", "18m", "<1m"). */
+function fmtBoostLeft(expiresAt?: number | null): string | null {
+  if (!expiresAt) return null;
+  const s = Math.max(0, Math.floor((expiresAt - serverNow()) / 1000));
+  if (s <= 0) return null;
+  if (s < 60) return "<1m";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const remM = m % 60;
+  if (h < 24) return remM > 0 ? `${h}h ${remM}m` : `${h}h`;
+  const d = Math.floor(h / 24);
+  const remH = h % 24;
+  return remH > 0 ? `${d}d ${remH}h` : `${d}d`;
+}
+
+function BoostsBar({ boosts }: { boosts?: ActiveBoost[] }) {
+  const [, tick] = useState(0);
+  const hasTimed = Boolean(boosts?.some((b) => b.expiresAt));
+  useEffect(() => {
+    if (!hasTimed) return;
+    const i = setInterval(() => tick((n) => n + 1), 30_000);
+    return () => clearInterval(i);
+  }, [hasTimed]);
+
+  const active = (boosts ?? []).filter((b) => !b.expiresAt || b.expiresAt > serverNow());
+  if (active.length === 0) return null;
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1">
+      <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-mute">Boosts</span>
+      {active.map((b) => {
+        const left = fmtBoostLeft(b.expiresAt);
+        return (
+          <span
+            key={b.key}
+            title={`${b.name}${b.detail ? ` (${b.detail})` : ""}${left ? ` · resta ${left}` : ""}`}
+            className="inline-flex items-center gap-1 rounded-md border border-[#7a5a1c] bg-[#33260e]/80 px-1.5 py-0.5 text-[10px] font-bold leading-none text-poke-gold"
+          >
+            {b.icon ? (
+              <img src={b.icon} alt="" width={14} height={14} className="size-3.5 object-contain [image-rendering:pixelated]" />
+            ) : (
+              <span aria-hidden>⚡</span>
+            )}
+            <span>{b.name}</span>
+            {b.detail && <span className="opacity-85">{b.detail}</span>}
+            {left && <span className="tnum rounded bg-black/35 px-1 py-0.5 text-[9px] text-fg">{left}</span>}
+          </span>
+        );
+      })}
+    </div>
   );
 }
 
@@ -811,6 +865,9 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {/* Boosts ativos na conta (XP, Loot, Captura, Shiny, VIP, Guild, Evento, Atrasados) */}
+      <BoostsBar boosts={acc.boosts} />
 
       {/* Equipe completa (clicável para abrir Ficha Completa; botão ★ Ativar troca o Pokémon ativo da equipe) */}
       {acc.team && acc.team.length > 0 && (

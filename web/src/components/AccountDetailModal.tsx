@@ -608,6 +608,49 @@ export function AccountDetailModal({
                       )}
                     </div>
                   </div>
+
+                  {/* Boosts ativos */}
+                  {acc.boosts && acc.boosts.length > 0 && (
+                    <div className="rounded-xl border border-[#7a5a1c]/70 bg-[#2a1f0b]/50 p-3 space-y-2">
+                      <div className="text-xs font-bold uppercase tracking-wide text-poke-gold">
+                        ⚡ Boosts Ativos ({acc.boosts.length})
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {acc.boosts.map((b) => {
+                          const sec = b.expiresAt ? Math.max(0, Math.floor((b.expiresAt - serverNow()) / 1000)) : null;
+                          const left =
+                            sec == null
+                              ? null
+                              : sec < 60
+                                ? "<1m"
+                                : sec < 3600
+                                  ? `${Math.floor(sec / 60)}m`
+                                  : sec < 86400
+                                    ? `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`
+                                    : `${Math.floor(sec / 86400)}d ${Math.floor((sec % 86400) / 3600)}h`;
+                          return (
+                            <div
+                              key={b.key}
+                              className="inline-flex items-center gap-2 rounded-lg border border-[#7a5a1c] bg-tile px-2.5 py-1.5 text-xs"
+                            >
+                              {b.icon ? (
+                                <img src={b.icon} alt="" width={20} height={20} className="size-5 object-contain [image-rendering:pixelated]" />
+                              ) : (
+                                <span aria-hidden>⚡</span>
+                              )}
+                              <div>
+                                <div className="font-bold text-fg">
+                                  {b.name}
+                                  {b.detail && <span className="ml-1 text-poke-gold">{b.detail}</span>}
+                                </div>
+                                {left && <div className="tnum text-[11px] text-mute">Restam {left}</div>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

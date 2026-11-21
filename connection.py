@@ -414,6 +414,8 @@ class AccountConnection:
                 self.hunts.extend(welcome.get("hunts", []))
                 self.itens_nossos = {int(i["id"]): i for i in welcome.get("itensNossos", [])
                                      if isinstance(i, dict) and "id" in i}
+                self.tipos_boost = {str(b["chave"]): b for b in welcome.get("tiposBoost", [])
+                                    if isinstance(b, dict) and b.get("chave")}
                 self.outland_tiers = normalize_tiers(welcome.get("outlandTiers"))
                 m = welcome.get("mercado")  # catálogo da vitrine + limites (preço mínimo, espera de compra)
                 self.mercado_cfg = m if isinstance(m, dict) else {}

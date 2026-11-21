@@ -12,6 +12,11 @@ export function startMock(emit: (m: SnapshotMessage) => void, setState: (s: Conn
     status: statuses[i],
     location: { kind: "hunt", label: `Hunt: ${["Bellsprout", "Caterpie", "Geodude", "Magikarp"][i]}`, detail: ["Bellsprout", "Caterpie", "Geodude", "Magikarp"][i], slug: ["bellsprout", "caterpie", "geodude", "magikarp"][i], inCenter: false, inHunt: true },
     escapeRopes: 2,
+    boosts: i === 0 ? [
+      { key: "xp", name: "XP Boost", detail: "×2", expiresAt: Date.now() + 7_800_000, icon: "/assets/site/assets/loja/exp.png" },
+      { key: "loot", name: "Loot Boost", detail: "×1.4", expiresAt: Date.now() + 3_200_000, icon: "/assets/site/assets/loja/loot.png" },
+      { key: "vip", name: "VIP", detail: "×1.5 XP", expiresAt: Date.now() + 9 * 86_400_000, icon: "/assets/site/assets/loja/vip.png" },
+    ] : [],
     pokemon: { id: 3289961 + i, speciesId: [25, 6, 94, 143][i], name: p, hp: 820, maxHp: 1000, level: [565, 487, 333, 21][i], looktype: [60025, 60006, 60094, 60143][i], xp: { atual: 146_290_000_000 + i * 9e9, nivel: 146_121_000_000 + i * 9e9, proximo: 146_334_000_000 + i * 9e9 } },
     team: [
       { id: 3289961 + i, speciesId: [25, 6, 94, 143][i], name: p, level: [565, 487, 333, 21][i], hp: 820, maxHp: 1000, looktype: [60025, 60006, 60094, 60143][i], shiny: false, slot: 0, active: true, quality: 1.72, potency: 3, grade: 5.4, ivTotal: 162 },

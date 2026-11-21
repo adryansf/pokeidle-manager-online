@@ -79,6 +79,14 @@ export interface AccountLocation {
   inHunt: boolean;
 }
 
+export interface ActiveBoost {
+  key: string;
+  name: string;
+  detail?: string | null;
+  expiresAt?: number | null;
+  icon?: string | null;
+}
+
 export interface InventoryItem {
   id: number;
   name: string;
@@ -134,6 +142,7 @@ export interface AccountSnapshot {
   blocked?: { kind: string; detail: string } | null;
   lastReason?: string;
   vip?: boolean;
+  boosts?: ActiveBoost[];
   session?: SessionInfo;
   pokemon: ActivePokemon | null;
   team?: TeamPokemon[];
