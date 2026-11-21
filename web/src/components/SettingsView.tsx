@@ -1079,7 +1079,7 @@ function GlobalForm({ onlyNotifications = false }: { onlyNotifications?: boolean
             <Labeled label="Fuso horário">
               <input className="field w-full" value={form.report_tz} onChange={(e) => setForm({ ...form, report_tz: e.target.value })} placeholder="America/Sao_Paulo" />
             </Labeled>
-            <Labeled label="URL pública do painel" hint="Opcional. Só para mostrar o ícone do item raro no Discord.">
+            <Labeled label="URL pública do painel" hint="Opcional. Só para mostrar o ícone do item raro nas notificações.">
               <input className="field w-full" value={form.public_url} onChange={(e) => setForm({ ...form, public_url: e.target.value })} placeholder="https://meu-dominio.exemplo" />
             </Labeled>
             <Labeled label="Servidor do jogo (WebSocket)" hint={`Padrão: ${s.defaultWsUrl}. Mudar reinicia as contas.`}>

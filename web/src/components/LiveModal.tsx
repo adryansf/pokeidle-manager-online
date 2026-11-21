@@ -80,7 +80,9 @@ function WildSlotCard({ slot }: { slot: LiveSlot }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-1.5">
             <div className="flex min-w-0 items-center gap-1 font-bold leading-tight">
-              <span className="truncate text-sm">{slot.name}</span>
+              <span className="truncate text-sm" title={slot.inferred ? "Espécie estimada da hunt atual (aguardando confirmação exata do servidor)" : undefined}>
+                {slot.inferred ? `~${slot.name}` : slot.name}
+              </span>
               {slot.shiny && <ShinyMark />}
               {slot.level != null && <span className="tnum shrink-0 text-xs font-medium text-mute">Nv.{slot.level}</span>}
             </div>

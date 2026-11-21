@@ -155,7 +155,7 @@ function PokemonPicker({ creatures, value, onChange }: { creatures: Record<strin
 }
 
 const KINDS = [
-  { id: "alert" as const, icon: Bell, title: "Avisar no Discord", desc: "Manda uma mensagem quando o preço bater o seu." },
+  { id: "alert" as const, icon: Bell, title: "Avisar nos canais", desc: "Manda uma mensagem nos canais configurados (Discord / Telegram) quando o preço bater o seu." },
   { id: "snipe" as const, icon: Crosshair, title: "Comprar sozinho", desc: "Compra por você quando o preço bater o seu." },
 ];
 
@@ -241,7 +241,7 @@ export function RuleDialog({ kind: initialKind, rule, preset, onClose, onSaved }
       ) : (
         <p className="flex items-center gap-1.5 text-sm text-mute">
           {snipe ? <Crosshair className="size-4 text-poke-gold" aria-hidden /> : <Bell className="size-4 text-poke-gold" aria-hidden />}
-          {snipe ? "Regra de compra automática" : "Regra de aviso no Discord"}
+          {snipe ? "Regra de compra automática" : "Regra de aviso nos canais"}
         </p>
       )}
 
@@ -736,7 +736,7 @@ export function RulesTab() {
         </div>
         {list.length === 0 ? (
           <p className="card p-6 text-center text-sm text-mute">
-            Nenhuma regra ainda. Crie uma para ser avisado no Discord, ou para comprar sozinho quando o preço estiver bom.
+            Nenhuma regra ainda. Crie uma para ser avisado nos seus canais de notificação (Discord / Telegram), ou para comprar sozinho quando o preço estiver bom.
             <br />
             Dica: abra um item na aba Comprar e use <b>Avisar</b> ou <b>Comprar sozinho</b>.
           </p>

@@ -126,6 +126,40 @@ class HuntManager:
         elif t == "campo.init":
             log.info("[%s] campo.init mapa=%s slug=%s", self.account_name,
                      msg.get("mapa"), msg.get("slug"))
+            self._handle_campo_init(msg)
+
+    def _current_hunt_species(self) -> list[dict]:
+        slug = self.session.slug if self.session else self.estado.get("huntSlug")
+        if not slug:
+            return []
+        h = next((x for x in self.hunts_catalog if isinstance(x, dict) and x.get("slug") == slug), None)
+        if not h:
+            return []
+        return [e for e in (h.get("especies") or []) if isinstance(e, dict) and e.get("pokeId")]
+
+    def _handle_campo_init(self, msg: dict) -> None:
+        """Se o servidor mandar lista inicial de selvagens em campo.init, pré-popula os slots do Modo Live."""
+        now = time.monotonic()
+        for key in ("selvagens", "spawns", "mobs", "slots"):
+            items = msg.get(key)
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                slot = item.get("slot")
+                if slot is None:
+                    continue
+                ls = self.live_slots.setdefault(slot, {"slot": slot, "state": "fighting", "_t": now})
+                ls["_t"] = now
+                for src_k, dst_k in (("nome", "name"), ("name", "name"), ("pokeId", "pokeId"),
+                                     ("speciesId", "pokeId"), ("looktype", "looktype"), ("level", "level"),
+                                     ("hp", "hp"), ("maxHp", "maxHp")):
+                    if item.get(src_k) is not None:
+                        ls[dst_k] = item.get(src_k)
+                if item.get("shiny") is not None:
+                    ls["shiny"] = bool(item.get("shiny"))
+                ls["inferred"] = False
 
     def _merge_estado_patch(self, patch: dict) -> None:
         """Merge parcial de `estado`; `pkMud` é tratado à parte (merge por id,
@@ -199,10 +233,25 @@ class HuntManager:
                     s.update({"slot": slot, "state": "fighting"})
                 s["_t"] = now
                 s["state"] = "fighting"
+                got_identity = False
                 for src_k, dst_k in (("alvo", "name"), ("nome", "name"), ("pokeId", "pokeId"),
                                      ("speciesId", "pokeId"), ("looktype", "looktype"), ("level", "level")):
                     if ev.get(src_k) is not None:
                         s[dst_k] = ev.get(src_k)
+                        if dst_k in ("name", "pokeId"):
+                            got_identity = True
+                if got_identity:
+                    s["inferred"] = False
+                elif not s.get("name") and not s.get("pokeId"):
+                    # O protocolo do jogo só manda `nome` no evento `morte`/`bola`; durante o combate (`ataque`),
+                    # inferimos a espécie a partir da hunt atual (certeza absoluta quando a hunt tem 1 espécie).
+                    species = self._current_hunt_species()
+                    if species:
+                        best = max(species, key=lambda e: e.get("pontos", 0) or 0)
+                        s["pokeId"] = int(best["pokeId"])
+                        if best.get("nome"):
+                            s["name"] = best["nome"]
+                        s["inferred"] = len(species) > 1
                 if ev.get("shiny") is not None:
                     s["shiny"] = bool(ev.get("shiny"))
                 if hp_alvo is not None:
@@ -232,6 +281,7 @@ class HuntManager:
                 s["chance"] = chance
                 if ev.get("nome"):
                     s["name"] = ev.get("nome")
+                    s["inferred"] = False
             self._push_live_event("ball", slot=slot, name=ev.get("nome") or (s or {}).get("name"),
                                   ballId=ball_id, caught=caught, shiny=shiny, chance=chance)
         elif k == "fugiu":
@@ -271,8 +321,10 @@ class HuntManager:
             ls["hp"] = 0
             if ev.get("nome"):
                 ls["name"] = ev.get("nome")
+                ls["inferred"] = False
             if ev.get("pokeId") or ev.get("speciesId"):
                 ls["pokeId"] = ev.get("pokeId") or ev.get("speciesId")
+                ls["inferred"] = False
             if ev.get("looktype"):
                 ls["looktype"] = ev.get("looktype")
             if ev.get("level") is not None:

@@ -127,7 +127,7 @@ export function PokemonTab() {
               Só P5
             </Check2>
             <button className="btn ml-auto" type="button" onClick={() => setAlert(true)}>
-              <Bell className="size-4" /> Avisar no Discord com estes filtros
+              <Bell className="size-4" /> Avisar nos canais com estes filtros
             </button>
           </div>
         </div>

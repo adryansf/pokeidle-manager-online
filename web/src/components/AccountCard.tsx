@@ -1,13 +1,15 @@
 import { AnimatePresence, motion, useDragControls, type PanInfo } from "framer-motion";
-import { ChevronDown, Clock, Crosshair, Crown, Globe, MapPin, Pause, Play, Radio, Star, Swords } from "lucide-react";
+import { ChevronDown, Clock, Crosshair, Crown, Globe, Heart, Info, MapPin, Pause, Play, Radio, Star, Swords } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { AccountDetailModal } from "@/components/AccountDetailModal";
 import { ItemSprite, PokemonSprite, ShinyMark } from "@/components/Sprites";
 import { EquipPopover } from "@/components/EquipPopover";
 import { LiveModal } from "@/components/LiveModal";
 import { StatusPill } from "@/components/StatusPill";
 import { XpMedallion, XpRace, XpSpark, XpVersus } from "@/components/XpMeters";
 import { AnimatedNumber, Coin, GoldPerHourIcon } from "@/components/ui";
-import { actions } from "@/lib/actions";
+import { actions, type AutomationPatch } from "@/lib/actions";
+import { accountNumber, useSheet } from "@/lib/sheet";
 import { serverNow, useAccount } from "@/lib/telemetry";
 import type { EquippedItem } from "@/lib/types";
 import { type CardStyle, useCardStyle } from "@/lib/cardStyle";
@@ -424,12 +426,17 @@ const SCROLL_EDGE = 84; // faixa junto à borda da tela que rola a página duran
 
 function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: CardMode; index?: number; drag?: CardDrag }) {
   const acc = useAccount(id);
+  const openSheet = useSheet();
   const cardStyle = useCardStyle();
   const controls = useDragControls();
   const [lifted, setLifted] = useState(false);
   const [liveOpen, setLiveOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
   const [pauseBusy, setPauseBusy] = useState(false);
+  const [autoBusy, setAutoBusy] = useState<string | null>(null);
   const closeLive = useCallback(() => setLiveOpen(false), []);
+  const closeDetail = useCallback(() => setDetailOpen(false), []);
+  const openLiveFromDetail = useCallback(() => setLiveOpen(true), []);
   const liftedRef = useRef(false);
   const hold = useRef<{ timer: number; x: number; y: number } | null>(null);
   const ptr = useRef({ x: 0, y: 0 }); // posição do dedo na tela durante o arrasto
@@ -535,27 +542,40 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
       onPointerMove={onPointerMove}
       onPointerUp={drop}
       onPointerCancel={drop}
+      onClick={(e) => {
+        if (justDragged()) return;
+        if ((e.target as HTMLElement).closest("button,a,input,select,textarea,[role='button']")) return;
+        setDetailOpen(true);
+      }}
       onContextMenu={touchMode ? (e) => e.preventDefault() : undefined}
       className={`card p-2.5 sm:p-3 ${drag?.canDrag ? "cursor-grab active:cursor-grabbing" : touchMode ? "select-none [-webkit-touch-callout:none]" : ""} ${lifted ? "ring-2 ring-poke-gold/70" : ""}`}
     >
       <header className="flex items-center gap-2.5 sm:gap-3.5">
         {(cardStyle === "corrida" || cardStyle === "padrao") && (
-        <motion.div
+        <motion.button
+          type="button"
+          disabled={!pk?.id}
+          title={pk?.id ? `Ver ficha completa de ${pk.name}` : undefined}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!justDragged() && pk?.id) openSheet({ kind: "own", account: accountNumber(id), id: pk.id }, e.currentTarget);
+          }}
           whileHover={{ rotate: -4, scale: 1.06 }}
           transition={{ type: "spring", stiffness: 320, damping: 16 }}
-          className="relative flex size-11 shrink-0 items-center justify-center rounded-full border-2 border-edge sm:size-14 sm:border-[3px]"
+          className="relative flex size-11 shrink-0 items-center justify-center rounded-full border-2 border-edge disabled:cursor-default sm:size-14 sm:border-[3px]"
           style={{ background: "radial-gradient(circle at 50% 35%, #4a3519, #1a120a 75%)", boxShadow: "0 0 14px -2px rgba(200,146,58,.45)" }}
         >
           <span className="origin-center scale-[.72] sm:scale-100">
-            <PokemonSprite looktype={pk?.looktype} size={52} />
+            <PokemonSprite looktype={pk?.looktype} species={pk?.speciesId} size={52} shiny={pk?.shiny} />
           </span>
-        </motion.div>
+        </motion.button>
         )}
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             {/* Nome, mapa e hunt na mesma linha; se faltar largura (celular), o que não couber desce junto. */}
-            <div className="flex min-w-0 flex-wrap items-center gap-x-3.5 gap-y-1.5">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
               <h3 className="max-w-full truncate text-base font-extrabold leading-tight tracking-tight sm:text-xl">
                 {acc.nick}
                 {acc.vip && (
@@ -570,7 +590,21 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
                 <b className="truncate font-semibold text-fg">{acc.huntName ?? prettySlug(acc.hunt?.slug)}</b>
               </span>
             </div>
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                title="Abrir painel detalhado da conta (abas: Visão Geral, Equipe, Automação, Inventário, Capturas)"
+                aria-label={`Abrir detalhes de ${acc.nick}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!justDragged()) setDetailOpen(true);
+                }}
+                className="inline-flex h-7 items-center gap-1 rounded-lg border border-line bg-tile px-2 text-[11px] font-bold text-mute transition-colors hover:border-edge hover:text-poke-gold active:scale-95"
+              >
+                <Info className="size-3.5" aria-hidden />
+                <span className="hidden md:inline">Detalhes</span>
+              </button>
               <button
                 type="button"
                 title="Abrir visão Ao Vivo (Modo Live)"
@@ -623,15 +657,25 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
               {pk?.shiny && <ShinyMark />}
             </span>
           </div>
-          <div
-            className="mt-1.5 h-1 overflow-hidden rounded-full bg-black/50 sm:mt-2 sm:h-1.5"
-            title={pk ? `${fmtShort(pk.hp)} / ${fmtShort(pk.maxHp)} HP` : undefined}
-          >
-            <motion.div
-              className="h-full rounded-full"
-              animate={{ width: `${hpPct}%`, backgroundColor: hpColor }}
-              transition={{ duration: 0.6, ease: EASE }}
-            />
+          {/* Barra de HP + valor numérico visível */}
+          <div className="mt-1.5 flex items-center gap-2 sm:mt-2">
+            <div
+              className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/50 sm:h-2"
+              title={pk ? `${fmtShort(pk.hp)} / ${fmtShort(pk.maxHp)} HP` : undefined}
+            >
+              <motion.div
+                className="h-full rounded-full"
+                animate={{ width: `${hpPct}%`, backgroundColor: hpColor }}
+                transition={{ duration: 0.6, ease: EASE }}
+              />
+            </div>
+            {pk && pk.maxHp > 0 && (
+              <span className="tnum inline-flex shrink-0 items-center gap-1 text-[11px] font-bold leading-none sm:text-xs" style={{ color: hpColor }}>
+                <Heart className="size-3 fill-current" aria-hidden />
+                {fmtShort(pk.hp)}/{fmtShort(pk.maxHp)}
+                <span className="hidden opacity-80 sm:inline">({Math.round(hpPct)}%)</span>
+              </span>
+            )}
           </div>
         </div>
       </header>
@@ -674,6 +718,85 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
         </AnimatePresence>
       </div>
 
+      {/* Equipe completa (clicável para abrir Ficha Completa do Pokémon) */}
+      {acc.team && acc.team.length > 0 && (
+        <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5">
+          <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-mute">Equipe</span>
+          {acc.team.map((m, idx) => {
+            const mpct = m.maxHp > 0 ? Math.max(0, Math.min(100, (m.hp / m.maxHp) * 100)) : 0;
+            const mcol = mpct > 50 ? "#6fd47c" : mpct > 20 ? "#f3c04a" : "#ef6b5b";
+            return (
+              <button
+                key={m.id ?? idx}
+                type="button"
+                disabled={!m.id}
+                title={`${m.name} Nv.${m.level} · HP ${fmtShort(m.hp)}/${fmtShort(m.maxHp)} (${Math.round(mpct)}%) — clique para abrir a ficha`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!justDragged() && m.id) openSheet({ kind: "own", account: accountNumber(id), id: m.id }, e.currentTarget);
+                }}
+                className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-1.5 py-1 text-left transition-colors hover:border-edge disabled:cursor-default ${
+                  m.active ? "border-poke-gold/70 bg-[#2a1f0b]/80" : "border-line bg-void/60"
+                }`}
+              >
+                <PokemonSprite looktype={m.looktype} species={m.speciesId} size={24} shiny={m.shiny} />
+                <div className="min-w-0 leading-tight">
+                  <div className="flex items-center gap-0.5 text-[11px] font-bold">
+                    <span className="max-w-[78px] truncate">{m.name}</span>
+                    {m.shiny && <ShinyMark className="text-[10px]" />}
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-1">
+                    <div className="h-1 w-10 overflow-hidden rounded-full bg-black/60">
+                      <div className="h-full rounded-full" style={{ width: `${mpct}%`, backgroundColor: mcol }} />
+                    </div>
+                    <span className="tnum text-[9px] text-mute">Nv.{fmtShort(m.level)}</span>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Automação em tempo real (1 clique para ativar/desativar direto no card) */}
+      {acc.automation && (
+        <div className="mt-2 flex flex-wrap items-center gap-1">
+          {(
+            [
+              ["autoCatch", "Captura", acc.automation.autoCatch, { autoCatch: !acc.automation.autoCatch }, "Captura automática de selvagens"],
+              ["gameAutoPotion", "Cura", acc.automation.gameAutoPotion, { gameAutoPotion: !acc.automation.gameAutoPotion }, "Cura automática do jogo"],
+              ["autoPotion", "Auto-Poção", acc.automation.autoPotion, { autoPotion: !acc.automation.autoPotion }, "Autocompra de poções na loja"],
+              ["autoBallRestock", "Auto-Bola", acc.automation.autoBallRestock, { autoBallRestock: !acc.automation.autoBallRestock }, "Autocompra de Pokébolas na loja"],
+              ["autoPotionFallback", "Fallback", acc.automation.autoPotionFallback, { autoPotionFallback: !acc.automation.autoPotionFallback }, "Trocar para próxima poção disponível se zerar"],
+              ["autoCenter", `Centro ≤${acc.automation.autoCenterHpPct}%`, acc.automation.autoCenter, { autoCenter: !acc.automation.autoCenter }, "Auto-Centro Pokémon de emergência sem poções"],
+            ] as [string, string, boolean, AutomationPatch, string][]
+          ).map(([key, label, on, patch, tip]) => (
+            <button
+              key={key}
+              type="button"
+              disabled={autoBusy === key || (key === "gameAutoPotion" && acc.status !== "online")}
+              title={`${tip} — clique para ${on ? "desativar" : "ativar"}`}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (justDragged() || autoBusy) return;
+                setAutoBusy(key);
+                void actions.setAutomation(id, patch).finally(() => setAutoBusy(null));
+              }}
+              className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors active:scale-95 disabled:opacity-50 ${
+                on
+                  ? "border-[#2f6b3a] bg-[#16301c]/80 text-poke-green hover:bg-[#1e4226]"
+                  : "border-line bg-void/60 text-mute/75 hover:border-edge hover:text-fg"
+              }`}
+            >
+              <span className={`size-1.5 rounded-full ${on ? "bg-poke-green" : "bg-mute/60"}`} />
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <footer className="mt-2.5 hidden flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-line pt-2 text-sm text-mute sm:flex">
         <span className="truncate">
           Hunt: <b className="font-semibold text-fg">{acc.huntName ?? prettySlug(acc.hunt?.slug)}</b>
@@ -689,6 +812,7 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
         )}
       </footer>
       <LiveModal accId={id} open={liveOpen} onClose={closeLive} />
+      <AccountDetailModal accId={id} open={detailOpen} onClose={closeDetail} onOpenLive={openLiveFromDetail} />
     </motion.article>
   );
 }

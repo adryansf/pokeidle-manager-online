@@ -200,6 +200,7 @@ class AccountConnection:
         self.on_pvp_month = None          # callback(conn, frame): Top PVP mensal (pvpMensal)
         self.on_pvp_table = None          # callback(conn, frame): página da tabela do PVP (Top 1.000)
         self.on_online = None             # async callback(conn): a conta acabou de ficar online
+        self.on_capture = None            # callback(dict): grava tentativa de captura (k == "bola")
         self.chat_mute_until = 0.0        # ms epoch: mute de chat aplicado pelo jogo
         self.exit_ip = "?"
         self._last_frame = time.monotonic()
@@ -234,7 +235,7 @@ class AccountConnection:
         self.hunt = HuntManager(account.name, self.estado, self.hunts)
         if self.daily:
             self.hunt.on_kill = lambda xp, gold: self.daily.add_kill(self.acc.nick, xp, gold)
-        self.balls = BallManager(account.name, self.estado, account.ball_priority)
+        self.balls = BallManager(account.name, self.estado, account.ball_priority, enabled=account.auto_catch)
         self.shop = ShopManager(account.name, self.estado)
         self.market = MarketClient(account.name, self.estado)
         self.pending_hunt: str | None = None      # hunt pedida no painel, aguardando a trava de combate acabar
@@ -242,21 +243,26 @@ class AccountConnection:
         self._last_auto_center_at: float = 0.0
         self._center_return_slug: str | None = None
         self.restockers: list[AutoRestock] = []
-        if account.auto_potion:
-            self.restockers.append(AutoRestock(
-                account.name, self.estado, self.shop, kind="item",
-                get_ids=potion_ids_resolver(self.estado, self.hunt.active_pokemon, lambda: self.acc.potion_id),
-                threshold=account.potion_restock_threshold, qty=account.potion_restock_qty,
-                gold_reserve=lambda: self.acc.gold_reserve))
-        if account.auto_ball_restock:
-            self.restockers.append(AutoRestock(
-                account.name, self.estado, self.shop, kind="ball",
-                get_ids=ball_ids_resolver(self.estado, account.ball_priority, lambda: self.acc.ball_id),
-                threshold=account.ball_restock_threshold, qty=account.ball_restock_qty,
-                gold_reserve=lambda: self.acc.gold_reserve))
+        self.rebuild_restockers()
         self.inventory = InventoryView(self.estado)
         self.pvp = PvpManager(account.name, self.estado, auto=account.pvp_auto)
         self._log = logging.LoggerAdapter(log, {})
+
+    def rebuild_restockers(self) -> None:
+        """Reconstrói os restockers em tempo real quando o usuário liga/desliga no card."""
+        self.restockers = []
+        if self.acc.auto_potion:
+            self.restockers.append(AutoRestock(
+                self.acc.name, self.estado, self.shop, kind="item",
+                get_ids=potion_ids_resolver(self.estado, self.hunt.active_pokemon, lambda: self.acc.potion_id),
+                threshold=self.acc.potion_restock_threshold, qty=self.acc.potion_restock_qty,
+                gold_reserve=lambda: self.acc.gold_reserve))
+        if self.acc.auto_ball_restock:
+            self.restockers.append(AutoRestock(
+                self.acc.name, self.estado, self.shop, kind="ball",
+                get_ids=ball_ids_resolver(self.estado, self.acc.ball_priority, lambda: self.acc.ball_id),
+                threshold=self.acc.ball_restock_threshold, qty=self.acc.ball_restock_qty,
+                gold_reserve=lambda: self.acc.gold_reserve))
 
     # ------------------------------------------------------------------ logs
     def _set(self, state: State, msg: str = "", reason: str = "") -> None:
@@ -429,12 +435,10 @@ class AccountConnection:
                     asyncio.create_task(self._inventory_logger()),
                     asyncio.create_task(self._hunt_queue_loop()),
                     asyncio.create_task(self._safety_loop()),
+                    asyncio.create_task(self.balls.run_forever()),
+                    asyncio.create_task(self._auto_restock_loop()),
                     asyncio.create_task(self.pvp.run_forever(lambda: int(self.estado.get("level") or 0))),
                 ]
-                if self.acc.auto_catch:
-                    background.append(asyncio.create_task(self.balls.run_forever()))
-                if self.restockers:
-                    background.append(asyncio.create_task(self._auto_restock_loop()))
 
                 recv_task = asyncio.create_task(self._recv_loop(ws))
                 try:
@@ -474,6 +478,7 @@ class AccountConnection:
                 self._track_shinies(msg)
                 self.hunt.handle_frame(msg)
                 self.balls.handle_frame(msg)
+                self._record_captures(msg)
                 self.shop.handle_frame(msg)
                 self.market.handle_frame(msg)
                 self.pvp.handle_frame(msg)
@@ -559,6 +564,44 @@ class AccountConnection:
                 label = f" **{name}**" if name else ""
                 outcome = "capturou" if captured else "encontrou"
                 self.notifier.send(self.acc.nick, f"✨ {outcome} um shiny{label}!", GOLD)
+
+    def _record_captures(self, msg: dict) -> None:
+        if not self.on_capture or msg.get("t") != "batalha":
+            return
+        slug = (self.hunt.session.slug if self.hunt.session else None) or self.estado.get("huntSlug") or ""
+        for ev in msg.get("ev", []):
+            if ev.get("k") != "bola":
+                continue
+            slot = ev.get("slot")
+            ls = self.hunt.live_slots.get(slot) if slot is not None else None
+            enc = self.shinies.encounters.get(slot) if slot is not None else None
+            name = (ev.get("nome") or (ls or {}).get("name") or (enc or {}).get("name") or "").strip()
+            pid = (ls or {}).get("pokeId")
+            look = (ls or {}).get("looktype")
+            level = ev.get("level") if ev.get("level") is not None else (ls or {}).get("level")
+            if not name and slug:
+                h = next((x for x in self.hunts if isinstance(x, dict) and x.get("slug") == slug), None)
+                if h and (h.get("especies") or []):
+                    sp = h["especies"][0]
+                    name = sp.get("nome") or h.get("nome") or slug
+                    pid = pid or sp.get("pokeId")
+            try:
+                self.on_capture({
+                    "ts": int(time.time() * 1000),
+                    "account_id": self.acc.index,
+                    "account_nick": self.acc.nick,
+                    "pokemon_name": name or (f"Selvagem #{slot}" if slot is not None else "Pokémon"),
+                    "poke_id": pid,
+                    "looktype": look or (60000 + int(pid) if pid and 1 <= int(pid) <= 1025 else None),
+                    "level": level,
+                    "shiny": bool(ev.get("shiny") or (ls or {}).get("shiny")),
+                    "ball_id": ev.get("ballId"),
+                    "success": bool(ev.get("sucesso")),
+                    "chance": round((ev.get("chance") or 0) * 100, 1) if ev.get("chance") is not None else None,
+                    "hunt_slug": slug,
+                })
+            except Exception:  # noqa: BLE001
+                log.debug("[%s] erro ao gravar histórico de captura", self.acc.name)
 
     # Itens raros do próprio servidor (Mystery Egg, fichas novas...): ids >= 70000 marcados como raros no
     # `welcome.itensNossos`. Os 4 acompanhados em session_stats têm tratamento próprio; o Boss Token não avisa.

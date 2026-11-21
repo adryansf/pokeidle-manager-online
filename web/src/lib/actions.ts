@@ -56,6 +56,7 @@ export interface LiveSlot {
   looktype?: number | null;
   level?: number | null;
   shiny: boolean;
+  inferred?: boolean;
   hp?: number | null;
   maxHp?: number | null;
   state: "fighting" | "corpse" | "caught" | "escaped" | string;
@@ -129,6 +130,51 @@ export interface AccountLive {
   events: LiveEvent[];
 }
 
+export interface CaptureRow {
+  id: number;
+  ts: number;
+  accountId: number;
+  account: string;
+  nick: string;
+  name: string;
+  pokeId?: number | null;
+  looktype?: number | null;
+  level?: number | null;
+  shiny: boolean;
+  ballId?: number | null;
+  ballName?: string | null;
+  success: boolean;
+  chance?: number | null;
+  huntSlug: string;
+}
+
+export interface CaptureStats {
+  total: number;
+  caught: number;
+  failed: number;
+  rate: number;
+  shinySeen: number;
+  shinyCaught: number;
+  byBall: { ballId: number; ballName: string; used: number; caught: number }[];
+}
+
+export interface CapturesResponse {
+  stats: CaptureStats;
+  items: CaptureRow[];
+}
+
+export type AutomationPatch = Partial<{
+  autoCatch: boolean;
+  autoPotion: boolean;
+  autoBallRestock: boolean;
+  autoPotionFallback: boolean;
+  autoCenter: boolean;
+  autoCenterHpPct: number;
+  goldReserve: number;
+  gameAutoPotion: boolean;
+  pvpAuto: boolean;
+}>;
+
 export const actions = {
   equip: (accId: string, kind: "ball" | "potion", id: number) =>
     call<EquipResult>("POST", `/api/accounts/${numId(accId)}/equip`, { kind, id }),
@@ -142,6 +188,17 @@ export const actions = {
     call<PauseResult>("POST", `/api/accounts/${numId(accId)}/pause`, paused === undefined ? {} : { paused }),
   live: (accId: string) => call<AccountLive>("GET", `/api/accounts/${numId(accId)}/live`),
   goCenter: (accId: string) => call<{ ok: boolean }>("POST", `/api/accounts/${numId(accId)}/center`),
+  setAutomation: (accId: string, patch: AutomationPatch) =>
+    call<{ ok: boolean; automation: import("./types").AccountAutomation }>("POST", `/api/accounts/${numId(accId)}/automation`, patch),
+  captures: (opts?: { account?: string; onlyCaught?: boolean; onlyShiny?: boolean; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (opts?.account && opts.account !== "all") q.set("account", opts.account);
+    if (opts?.onlyCaught) q.set("only_caught", "true");
+    if (opts?.onlyShiny) q.set("only_shiny", "true");
+    if (opts?.limit) q.set("limit", String(opts.limit));
+    const qs = q.toString();
+    return call<CapturesResponse>("GET", `/api/captures${qs ? `?${qs}` : ""}`);
+  },
   bulkPause: (paused: boolean) => call<{ ok: boolean; paused: boolean; count: number }>("POST", "/api/bulk/pause", { paused }),
   bulkCenter: () => call<{ ok: boolean; sent: string[]; skipped: string[] }>("POST", "/api/bulk/center"),
   bulkEquip: (kind: "ball" | "potion", id: number) =>

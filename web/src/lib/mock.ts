@@ -10,7 +10,13 @@ export function startMock(emit: (m: SnapshotMessage) => void, setState: (s: Conn
     nick: `Treinador${i + 1}`,
     level: [2104, 1306, 450, 40][i],
     status: statuses[i],
-    pokemon: { name: p, hp: 100, maxHp: 100, level: [565, 487, 333, 21][i], looktype: [60025, 60006, 60094, 60143][i], xp: { atual: 146_290_000_000 + i * 9e9, nivel: 146_121_000_000 + i * 9e9, proximo: 146_334_000_000 + i * 9e9 } },
+    pokemon: { id: 3289961 + i, speciesId: [25, 6, 94, 143][i], name: p, hp: 820, maxHp: 1000, level: [565, 487, 333, 21][i], looktype: [60025, 60006, 60094, 60143][i], xp: { atual: 146_290_000_000 + i * 9e9, nivel: 146_121_000_000 + i * 9e9, proximo: 146_334_000_000 + i * 9e9 } },
+    team: [
+      { id: 3289961 + i, speciesId: [25, 6, 94, 143][i], name: p, level: [565, 487, 333, 21][i], hp: 820, maxHp: 1000, looktype: [60025, 60006, 60094, 60143][i], shiny: false, slot: 0, active: true, quality: 1.72, potency: 3, grade: 5.4, ivTotal: 162 },
+      { id: 3289971 + i, speciesId: 248, name: "Tyranitar", level: 420, hp: 900, maxHp: 900, looktype: 60248, shiny: i === 0, slot: 1, active: false, quality: 1.55, potency: 2, grade: 4.8, ivTotal: 144 },
+      { id: 3289981 + i, speciesId: 212, name: "Scizor", level: 390, hp: 750, maxHp: 800, looktype: 60212, shiny: false, slot: 2, active: false, quality: 1.4, potency: 2, grade: 4.1, ivTotal: 138 },
+    ],
+    automation: { autoCatch: true, autoPotion: false, autoBallRestock: false, autoPotionFallback: true, autoCenter: true, autoCenterHpPct: 20, goldReserve: 0, gameAutoPotion: true, hpLimiar: 0.4, pvpAuto: false },
     xp: { atual: 52_000_000_000 + i * 3e9, nivel: 51_700_000_000 + i * 3e9, proximo: 52_150_000_000 + i * 3e9 },
     pass: [{ ultimo: D - 1, degrau: 6, total: 5, vipAte: 0, ciclos: 0, vipPegos: 0 }, { ultimo: D, degrau: 12, total: 40, vipAte: Date.now() + 9 * 86_400_000, ciclos: 1, vipPegos: 0b11111111111, ultimoVip: D }, { ultimo: D - 3, degrau: 3, total: 3, vipAte: 0, ciclos: 0, vipPegos: 0 }, null][i],
     map: [{ region: "outland", label: "Outland 2", outland: { tier: 2, label: "Outland 2", mult: 1.25 } }, { region: "hoenn", label: "Hoenn", outland: null }, { region: "kanto", label: "Kanto", outland: null }, { region: "outland", label: "Outland 1", outland: { tier: 1, label: "Outland 1", mult: 1 } }][i],
@@ -441,6 +447,24 @@ function installMockApi(accs: AccountSnapshot[]) {
       const opt = a.equipped!.options![kind].find((o) => o.id === id)!;
       a.equipped![kind] = { ...opt };
       return json({ ok: true, stock: opt.qty, willBuy: opt.qty < 100, restockEnabled: true, buyable: id !== 5 });
+    }
+    m = path.match(/^\/api\/accounts\/(\d+)\/automation$/);
+    if (m && init?.method === "POST") {
+      await wait();
+      const a = accs[Number(m[1]) - 1];
+      const patch = JSON.parse(String(init.body));
+      a.automation = { ...(a.automation as NonNullable<AccountSnapshot["automation"]>), ...patch };
+      return json({ ok: true, automation: a.automation });
+    }
+    if (path === "/api/captures") {
+      const now = Date.now();
+      return json({
+        stats: { total: 42, caught: 19, failed: 23, rate: 45.2, shinySeen: 1, shinyCaught: 1, byBall: [{ ballId: 4, ballName: "Ultra Ball", used: 30, caught: 15 }, { ballId: 2, ballName: "Great Ball", used: 12, caught: 4 }] },
+        items: [
+          { id: 2, ts: now - 12_000, accountId: 1, account: "acc1", nick: "Treinador1", name: "Bellsprout", pokeId: 69, looktype: 60069, level: 148, shiny: true, ballId: 4, ballName: "Ultra Ball", success: true, chance: 72.5, huntSlug: "bellsprout" },
+          { id: 1, ts: now - 45_000, accountId: 2, account: "acc2", nick: "Treinador2", name: "Caterpie", pokeId: 10, looktype: 60010, level: 95, shiny: false, ballId: 2, ballName: "Great Ball", success: false, chance: 34.0, huntSlug: "caterpie" },
+        ],
+      });
     }
     m = path.match(/^\/api\/accounts\/(\d+)\/center$/);
     if (m && init?.method === "POST") {

@@ -127,6 +127,23 @@ CREATE TABLE IF NOT EXISTS proxies (
     last_tested_at REAL,
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS captures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    account_id INTEGER NOT NULL,
+    account_nick TEXT NOT NULL,
+    pokemon_name TEXT NOT NULL,
+    poke_id INTEGER,
+    looktype INTEGER,
+    level INTEGER,
+    shiny INTEGER NOT NULL DEFAULT 0,
+    ball_id INTEGER,
+    success INTEGER NOT NULL,
+    chance REAL,
+    hunt_slug TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_captures_ts ON captures(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_captures_acc ON captures(account_id, ts DESC);
 """
 
 
@@ -338,6 +355,115 @@ class Store:
         with self._lock:
             self._db.execute("DELETE FROM proxies WHERE id=?", (proxy_id,))
             self._db.commit()
+
+    # ----------------------------------------------------------- histórico de capturas
+    CAPTURES_MAX = 5000
+
+    def add_capture(self, d: dict) -> int:
+        with self._lock:
+            cur = self._db.execute(
+                "INSERT INTO captures (ts, account_id, account_nick, pokemon_name, poke_id, looktype, "
+                "level, shiny, ball_id, success, chance, hunt_slug) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    int(d.get("ts") or time.time() * 1000),
+                    int(d["account_id"]),
+                    str(d.get("account_nick") or ""),
+                    str(d.get("pokemon_name") or "Desconhecido"),
+                    int(d["poke_id"]) if d.get("poke_id") is not None else None,
+                    int(d["looktype"]) if d.get("looktype") is not None else None,
+                    int(d["level"]) if d.get("level") is not None else None,
+                    1 if d.get("shiny") else 0,
+                    int(d["ball_id"]) if d.get("ball_id") is not None else None,
+                    1 if d.get("success") else 0,
+                    float(d["chance"]) if d.get("chance") is not None else None,
+                    str(d.get("hunt_slug") or ""),
+                ),
+            )
+            self._db.execute(
+                "DELETE FROM captures WHERE id NOT IN (SELECT id FROM captures ORDER BY id DESC LIMIT ?)",
+                (self.CAPTURES_MAX,),
+            )
+            self._db.commit()
+            return int(cur.lastrowid)
+
+    def list_captures(
+        self,
+        *,
+        account_id: int | None = None,
+        only_caught: bool = False,
+        only_shiny: bool = False,
+        limit: int = 200,
+    ) -> list[dict]:
+        where: list[str] = []
+        vals: list = []
+        if account_id is not None:
+            where.append("account_id=?")
+            vals.append(int(account_id))
+        if only_caught:
+            where.append("success=1")
+        if only_shiny:
+            where.append("shiny=1")
+        sql = "SELECT * FROM captures"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY id DESC LIMIT ?"
+        vals.append(min(max(int(limit), 1), 1000))
+        with self._lock:
+            rows = self._db.execute(sql, vals).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "ts": r["ts"],
+                "accountId": r["account_id"],
+                "account": f"acc{r['account_id']}",
+                "nick": r["account_nick"],
+                "name": r["pokemon_name"],
+                "pokeId": r["poke_id"],
+                "looktype": r["looktype"],
+                "level": r["level"],
+                "shiny": bool(r["shiny"]),
+                "ballId": r["ball_id"],
+                "success": bool(r["success"]),
+                "chance": r["chance"],
+                "huntSlug": r["hunt_slug"],
+            }
+            for r in rows
+        ]
+
+    def capture_stats(self, account_id: int | None = None) -> dict:
+        where = " WHERE account_id=?" if account_id is not None else ""
+        vals = (int(account_id),) if account_id is not None else ()
+        with self._lock:
+            r = self._db.execute(
+                f"SELECT COUNT(*) AS total, "
+                f"SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) AS caught, "
+                f"SUM(CASE WHEN success=0 THEN 1 ELSE 0 END) AS failed, "
+                f"SUM(CASE WHEN shiny=1 THEN 1 ELSE 0 END) AS shiny_seen, "
+                f"SUM(CASE WHEN shiny=1 AND success=1 THEN 1 ELSE 0 END) AS shiny_caught "
+                f"FROM captures{where}",
+                vals,
+            ).fetchone()
+            ball_rows = self._db.execute(
+                f"SELECT ball_id, COUNT(*) AS used, SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) AS caught "
+                f"FROM captures{where} GROUP BY ball_id",
+                vals,
+            ).fetchall()
+        total = int(r["total"] or 0)
+        caught = int(r["caught"] or 0)
+        failed = int(r["failed"] or 0)
+        return {
+            "total": total,
+            "caught": caught,
+            "failed": failed,
+            "rate": round((caught / total) * 100, 1) if total > 0 else 0.0,
+            "shinySeen": int(r["shiny_seen"] or 0),
+            "shinyCaught": int(r["shiny_caught"] or 0),
+            "byBall": [
+                {"ballId": br["ball_id"], "used": int(br["used"] or 0), "caught": int(br["caught"] or 0)}
+                for br in ball_rows
+                if br["ball_id"] is not None
+            ],
+        }
 
     # ----------------------------------------------------------- configurações
     def get_setting(self, key: str) -> str:

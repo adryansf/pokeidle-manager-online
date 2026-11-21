@@ -85,9 +85,12 @@ const sameAccount = (a: AccountSnapshot, b: AccountSnapshot) =>
   a.captured?.total === b.captured?.total &&
   a.captured?.shiny === b.captured?.shiny &&
   JSON.stringify(a.inventory) === JSON.stringify(b.inventory) &&
+  a.pokemon?.id === b.pokemon?.id &&
   a.pokemon?.name === b.pokemon?.name &&
   a.pokemon?.hp === b.pokemon?.hp &&
-  a.pokemon?.maxHp === b.pokemon?.maxHp;
+  a.pokemon?.maxHp === b.pokemon?.maxHp &&
+  JSON.stringify(a.team) === JSON.stringify(b.team) &&
+  JSON.stringify(a.automation) === JSON.stringify(b.automation);
 
 export function applySnapshot(msg: SnapshotMessage) {
   const prev = data.get();

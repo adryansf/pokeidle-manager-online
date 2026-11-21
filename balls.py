@@ -30,10 +30,11 @@ log = logging.getLogger("balls")
 
 
 class BallManager:
-    def __init__(self, account_name: str, estado: dict, ball_priority: tuple[int, ...]):
+    def __init__(self, account_name: str, estado: dict, ball_priority: tuple[int, ...], enabled: bool = True):
         self.account_name = account_name
         self.estado = estado
         self.ball_priority = ball_priority
+        self.enabled = bool(enabled)
         self._ws = None
         self._corpses: dict[int, float] = {}   # slot -> deadline (time.monotonic())
         self._pending: set[int] = set()         # slots com ball.throw em voo
@@ -113,6 +114,9 @@ class BallManager:
         now = time.monotonic()
         for slot in [s for s, deadline in self._corpses.items() if now > deadline]:
             del self._corpses[slot]  # janela de 30s expirou sem tentativa
+
+        if not self.enabled or self._ws is None:
+            return
 
         if now - self._last_throw_at < config.BALL_THROW_COOLDOWN_S:
             return

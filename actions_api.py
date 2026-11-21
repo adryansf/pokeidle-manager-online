@@ -59,6 +59,18 @@ class BulkHuntIn(BaseModel):
     slug: str
 
 
+class AutomationPatchIn(BaseModel):
+    autoCatch: bool | None = None
+    autoPotion: bool | None = None
+    autoBallRestock: bool | None = None
+    autoPotionFallback: bool | None = None
+    autoCenter: bool | None = None
+    autoCenterHpPct: int | None = None
+    goldReserve: int | None = None
+    gameAutoPotion: bool | None = None
+    pvpAuto: bool | None = None
+
+
 def hunt_catalog(conn: AccountConnection) -> list[dict]:
     """`welcome.hunts` da conta, só com os campos que o mapa usa."""
     out = []
@@ -410,6 +422,7 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
                 "looktype": _look_for(pid_int, raw_s.get("looktype")),
                 "level": raw_s.get("level"),
                 "shiny": bool(raw_s.get("shiny")),
+                "inferred": bool(raw_s.get("inferred")),
                 "hp": raw_s.get("hp"),
                 "maxHp": raw_s.get("maxHp"),
                 "state": raw_s.get("state", "fighting"),
@@ -482,6 +495,82 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
         await conn.hunt.go_to_center()
         conn.hunt._push_live_event("center", name=conn.acc.nick, manual=True)
         return {"ok": True}
+
+    @app.post("/api/accounts/{acc_id}/automation")
+    async def toggle_automation(acc_id: int, body: AutomationPatchIn, request: Request,
+                                tok: str | None = Query(None, alias="token")):
+        """Ativa ou desativa itens de automação em tempo real (sem reiniciar a conexão da conta)."""
+        if (r := guard(request, tok)):
+            return r
+        conn = conn_of(acc_id)
+        if conn is None:
+            return JSONResponse({"error": "conta não encontrada ou desligada"}, status_code=404)
+        sent = body.model_fields_set
+        opts: dict = {}
+        acc_changes: dict = {}
+        if "autoCatch" in sent and body.autoCatch is not None:
+            opts["auto_catch"] = acc_changes["auto_catch"] = bool(body.autoCatch)
+            conn.balls.enabled = bool(body.autoCatch)
+        if "autoPotion" in sent and body.autoPotion is not None:
+            opts["auto_potion"] = acc_changes["auto_potion"] = bool(body.autoPotion)
+        if "autoBallRestock" in sent and body.autoBallRestock is not None:
+            opts["auto_ball_restock"] = acc_changes["auto_ball_restock"] = bool(body.autoBallRestock)
+        if "autoPotionFallback" in sent and body.autoPotionFallback is not None:
+            opts["auto_potion_fallback"] = acc_changes["auto_potion_fallback"] = bool(body.autoPotionFallback)
+        if "autoCenter" in sent and body.autoCenter is not None:
+            opts["auto_center"] = acc_changes["auto_center"] = bool(body.autoCenter)
+        if "autoCenterHpPct" in sent and body.autoCenterHpPct is not None:
+            v = min(max(int(body.autoCenterHpPct), 5), 80)
+            opts["auto_center_hp_pct"] = acc_changes["auto_center_hp_pct"] = v
+        if "goldReserve" in sent and body.goldReserve is not None:
+            v = max(0, int(body.goldReserve))
+            opts["gold_reserve"] = acc_changes["gold_reserve"] = v
+        if "pvpAuto" in sent and body.pvpAuto is not None:
+            opts["pvp_auto"] = acc_changes["pvp_auto"] = bool(body.pvpAuto)
+            conn.pvp.auto = bool(body.pvpAuto)
+        if acc_changes:
+            conn.acc = replace(conn.acc, **acc_changes)
+            if "auto_potion" in acc_changes or "auto_ball_restock" in acc_changes:
+                conn.rebuild_restockers()
+            store.update_account(acc_id, {"options": opts})
+        if "gameAutoPotion" in sent and body.gameAutoPotion is not None:
+            if not conn.can_send:
+                return JSONResponse({"error": "conta offline para alterar a cura automática do jogo"}, status_code=409)
+            await conn.set_automation({"autoPotion": bool(body.gameAutoPotion)})
+            auto = conn.estado.setdefault("automation", {})
+            auto["autoPotion"] = bool(body.gameAutoPotion)
+        from telemetry import _automation_snapshot
+        return {"ok": True, "automation": _automation_snapshot(conn)}
+
+    @app.get("/api/captures")
+    async def list_captures(
+        request: Request,
+        tok: str | None = Query(None, alias="token"),
+        account: str | None = None,
+        only_caught: bool = False,
+        only_shiny: bool = False,
+        limit: int = 200,
+    ):
+        """Histórico de capturas (tentativas de bola) salvo em banco + estatísticas agregadas."""
+        if (r := auth.read_guard(request, tok)):
+            return r
+        acc_id: int | None = None
+        if account and account != "all":
+            digits = "".join(ch for ch in str(account) if ch.isdigit())
+            if digits:
+                acc_id = int(digits)
+        items = store.list_captures(
+            account_id=acc_id,
+            only_caught=only_caught,
+            only_shiny=only_shiny,
+            limit=limit,
+        )
+        for it in items:
+            it["ballName"] = BALL_NAMES.get(it["ballId"]) if it.get("ballId") else None
+        stats = store.capture_stats(account_id=acc_id)
+        for b in stats["byBall"]:
+            b["ballName"] = BALL_NAMES.get(b["ballId"]) or f"Bola #{b['ballId']}"
+        return {"stats": stats, "items": items}
 
     # ---------------------------------------------------------- Ações em Massa (Modo Eco)
     @app.post("/api/bulk/pause")

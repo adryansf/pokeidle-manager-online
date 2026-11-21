@@ -206,6 +206,57 @@ def _proxy_snapshot(c: "AccountConnection", proxy_names: dict[tuple, str] | None
     }
 
 
+def _team_snapshot(c: "AccountConnection") -> list[dict]:
+    """Todos os Pokémons na equipe ativa (slot != None, ordenados por slot, mais o ativo se fora de slot)."""
+    est = c.estado
+    active_id = est.get("activeId")
+    members: list[dict] = []
+    seen_ids: set[int] = set()
+    for p in est.get("pokemons") or []:
+        if not isinstance(p, dict):
+            continue
+        pid = p.get("id")
+        if p.get("slot") is None and pid != active_id:
+            continue
+        if isinstance(pid, int):
+            seen_ids.add(pid)
+        ivs = p.get("ivs") or {}
+        members.append({
+            "id": pid,
+            "speciesId": p.get("speciesId"),
+            "name": p.get("nome", "?"),
+            "level": p.get("level") or 0,
+            "hp": p.get("hp") or 0,
+            "maxHp": p.get("maxHp") or 0,
+            "looktype": look_of(p),
+            "shiny": bool(p.get("shiny")),
+            "slot": p.get("slot"),
+            "active": pid is not None and pid == active_id,
+            "quality": p.get("quality"),
+            "potency": p.get("potencia"),
+            "grade": p.get("nota"),
+            "ivTotal": sum(v for v in ivs.values() if isinstance(v, (int, float))),
+        })
+    members.sort(key=lambda m: (0 if m["active"] else 1, m["slot"] if m["slot"] is not None else 999))
+    return members
+
+
+def _automation_snapshot(c: "AccountConnection") -> dict:
+    auto = c.estado.get("automation") or {}
+    return {
+        "autoCatch": bool(c.balls.enabled),
+        "autoPotion": bool(c.acc.auto_potion),
+        "autoBallRestock": bool(c.acc.auto_ball_restock),
+        "autoPotionFallback": bool(c.acc.auto_potion_fallback),
+        "autoCenter": bool(c.acc.auto_center),
+        "autoCenterHpPct": int(c.acc.auto_center_hp_pct),
+        "goldReserve": int(c.acc.gold_reserve),
+        "gameAutoPotion": bool(auto.get("autoPotion", True)),
+        "hpLimiar": auto.get("hpLimiar"),
+        "pvpAuto": bool(c.pvp.auto),
+    }
+
+
 def account_snapshot(c: "AccountConnection", proxy_names: dict[tuple, str] | None = None) -> dict:
     from inventory import POTION_NAMES  # evita ciclo em import-time
 
@@ -227,6 +278,8 @@ def account_snapshot(c: "AccountConnection", proxy_names: dict[tuple, str] | Non
         "blocked": c.block,      # {kind, detail} quando o jogo recusou a conta
         "lastReason": c.last_reason,
         "pokemon": {
+            "id": pk.get("id"),
+            "speciesId": pk.get("speciesId"),
             "name": pk.get("nome", "?"),
             "hp": pk.get("hp", 0),
             "maxHp": pk.get("maxHp", 0),
@@ -235,6 +288,8 @@ def account_snapshot(c: "AccountConnection", proxy_names: dict[tuple, str] | Non
             "looktype": look_of(pk),
             "shiny": bool(pk.get("shiny")),
         } if pk else None,
+        "team": _team_snapshot(c),
+        "automation": _automation_snapshot(c),
         "xpPerHour": round(s.xp_por_hora) if s else 0,
         "goldPerHour": round(s.gold_por_hora) if s else 0,
         "xp": {"atual": est.get("xp"), "nivel": est.get("xpNivel"), "proximo": est.get("xpProximo")},

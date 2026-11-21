@@ -1,8 +1,9 @@
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from "framer-motion";
-import { Bell, Globe, Layers, LayoutDashboard, Map as MapIcon, MessagesSquare, Package, RotateCcw, Settings, Store, Swords, Ticket } from "lucide-react";
+import { Bell, Globe, Layers, LayoutDashboard, Map as MapIcon, MessagesSquare, Package, RotateCcw, Settings, Store, Swords, Target, Ticket } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccountCard, type CardDrag, type CardMode } from "@/components/AccountCard";
 import { BulkActionsModal } from "@/components/BulkActionsModal";
+import { CapturesView } from "@/components/CapturesView";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { AccountSelect, InventoryView } from "@/components/InventoryView";
 import { MapaView } from "@/components/MapaView";
@@ -20,21 +21,22 @@ import { startChat, totalUnread, useChat } from "@/lib/chat";
 import { useAccountIds, useAccountsMap } from "@/lib/telemetry";
 import { useCardOrder } from "@/lib/useCardOrder";
 
-type Tab = "dashboard" | "inventario" | "mapa" | "mercado" | "passe" | "pvp" | "config" | "chat";
+type Tab = "dashboard" | "inventario" | "capturas" | "mapa" | "mercado" | "passe" | "pvp" | "config" | "chat";
 const TABS: { id: Tab; label: string; Icon: typeof Package }[] = [
   { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
   { id: "inventario", label: "Inventários", Icon: Package },
+  { id: "capturas", label: "Capturas", Icon: Target },
   { id: "mapa", label: "Mapa", Icon: MapIcon },
   { id: "mercado", label: "Mercado", Icon: Store },
   { id: "passe", label: "Passe", Icon: Ticket },
   { id: "pvp", label: "PVP", Icon: Swords },
   { id: "config", label: "Configurações", Icon: Settings },
 ];
-/** Barra de baixo do celular, em duas fileiras de 4: Mapa, Mercado, PVP e Chat em cima; Dashboard, Inventários, Passe e Configurações embaixo. */
+/** Barra de baixo do celular, em duas fileiras: Mapa, Mercado, Capturas, PVP e Chat; Dashboard, Inventários, Passe e Configurações. */
 const MOBILE_TABS: { id: Tab; label: string; Icon: typeof Package }[] = [
-  ...(["mapa", "mercado", "pvp"] as Tab[]).map((id) => TABS.find((t) => t.id === id)!),
+  ...(["mapa", "mercado", "capturas"] as Tab[]).map((id) => TABS.find((t) => t.id === id)!),
   { id: "chat", label: "Chat", Icon: MessagesSquare },
-  ...(["dashboard", "inventario", "passe", "config"] as Tab[]).map((id) => TABS.find((t) => t.id === id)!),
+  ...(["dashboard", "inventario", "pvp", "config"] as Tab[]).map((id) => TABS.find((t) => t.id === id)!),
 ];
 const MODES: { id: CardMode; label: string }[] = [
   { id: "resumo", label: "Resumo" },
@@ -43,8 +45,8 @@ const MODES: { id: CardMode; label: string }[] = [
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 const readTab = (): Tab =>
-  location.hash === "#inventario" ? "inventario" : location.hash === "#mapa" ? "mapa" : location.hash === "#mercado" ? "mercado" : location.hash === "#passe" ? "passe" : location.hash === "#pvp" ? "pvp" : location.hash === "#config" ? "config" : location.hash === "#chat" ? "chat" : "dashboard";
-const TITLES: Record<Tab, string> = { dashboard: "Painel de Contas", inventario: "Inventários", mapa: "Mapa", mercado: "Mercado", passe: "Passe de Batalha", pvp: "PVP", config: "Configurações", chat: "Chat" };
+  location.hash === "#inventario" ? "inventario" : location.hash === "#capturas" ? "capturas" : location.hash === "#mapa" ? "mapa" : location.hash === "#mercado" ? "mercado" : location.hash === "#passe" ? "passe" : location.hash === "#pvp" ? "pvp" : location.hash === "#config" ? "config" : location.hash === "#chat" ? "chat" : "dashboard";
+const TITLES: Record<Tab, string> = { dashboard: "Painel de Contas", inventario: "Inventários", capturas: "Histórico de Capturas", mapa: "Mapa", mercado: "Mercado", passe: "Passe de Batalha", pvp: "PVP", config: "Configurações", chat: "Chat" };
 
 function UnreadBadge() {
   const u = totalUnread(useChat());
@@ -355,7 +357,7 @@ export default function App() {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.25, ease: EASE }}
               >
-                {tab === "dashboard" ? <Dashboard mode={mode} /> : tab === "inventario" ? <InventoryView account={account} /> : tab === "mapa" ? <MapaView /> : tab === "mercado" ? <MarketView /> : tab === "passe" ? <PassView /> : tab === "pvp" ? <PvpView /> : tab === "chat" ? <ChatView /> : <SettingsView />}
+                {tab === "dashboard" ? <Dashboard mode={mode} /> : tab === "inventario" ? <InventoryView account={account} /> : tab === "capturas" ? <CapturesView /> : tab === "mapa" ? <MapaView /> : tab === "mercado" ? <MarketView /> : tab === "passe" ? <PassView /> : tab === "pvp" ? <PvpView /> : tab === "chat" ? <ChatView /> : <SettingsView />}
               </motion.div>
             </AnimatePresence>
           </main>

@@ -13,6 +13,8 @@ export interface XpBar {
 }
 
 export interface ActivePokemon {
+  id?: number | null;
+  speciesId?: number | null;
   name: string;
   hp: number;
   maxHp: number;
@@ -20,6 +22,36 @@ export interface ActivePokemon {
   xp?: XpBar | null;
   looktype?: number | null;
   shiny?: boolean;
+}
+
+export interface TeamPokemon {
+  id: number | null;
+  speciesId?: number | null;
+  name: string;
+  level: number;
+  hp: number;
+  maxHp: number;
+  looktype?: number | null;
+  shiny: boolean;
+  slot: number | null;
+  active: boolean;
+  quality?: number | null;
+  potency?: number | null;
+  grade?: number | null;
+  ivTotal?: number;
+}
+
+export interface AccountAutomation {
+  autoCatch: boolean;
+  autoPotion: boolean;
+  autoBallRestock: boolean;
+  autoPotionFallback: boolean;
+  autoCenter: boolean;
+  autoCenterHpPct: number;
+  goldReserve: number;
+  gameAutoPotion: boolean;
+  hpLimiar?: number | null;
+  pvpAuto: boolean;
 }
 
 export interface InventoryItem {
@@ -75,6 +107,8 @@ export interface AccountSnapshot {
   vip?: boolean;
   session?: SessionInfo;
   pokemon: ActivePokemon | null;
+  team?: TeamPokemon[];
+  automation?: AccountAutomation;
   xpPerHour: number;
   /** Barra de XP do treinador (o do Pokémon equipado vem em `pokemon.xp`). */
   xp?: XpBar | null;

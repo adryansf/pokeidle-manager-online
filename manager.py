@@ -60,11 +60,15 @@ class AccountManager:
         self.store.set_token(acc_id, token)
         log.info("[acc%d] token renovado pelo servidor e salvo", acc_id)
 
+    def _on_capture(self, data: dict) -> None:
+        self.store.add_capture(data)
+
     def _spawn(self, row: dict) -> None:
         acc = build_account_config(row)
         conn = AccountConnection(acc, self.settings(), self.notifier, self.daily)
         conn.on_auth_status = self._on_auth_status
         conn.on_token_renewed = self._on_token_renewed
+        conn.on_capture = self._on_capture
         conn.on_chat = self.chat.handle_frame
         conn.on_pvp_table = self.pvp_ladder.handle_frame
         conn.on_pvp_month = self.pvp_monthly.handle_frame

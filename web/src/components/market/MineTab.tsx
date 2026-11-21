@@ -144,7 +144,7 @@ function SellNow({ items, owned }: { items: MarketItem[]; owned: Map<number, num
         <TrendingUp className="size-4 text-poke-gold" aria-hidden /> Hora de vender
       </h2>
       {hot.length === 0 ? (
-        <p className="tile px-3 py-2.5 text-sm text-mute">Nenhum item raro está caro em Gemas agora. Avisamos no Discord quando um que você tem ficar.</p>
+        <p className="tile px-3 py-2.5 text-sm text-mute">Nenhum item raro está caro em Gemas agora. Avisamos nos seus canais de notificação quando um que você tem ficar.</p>
       ) : (
         <ul className="grid gap-1.5 sm:grid-cols-2">
           {hot.map(({ it, qty, floor, avg, prem }) => (
