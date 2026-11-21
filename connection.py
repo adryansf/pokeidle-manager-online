@@ -888,9 +888,12 @@ class AccountConnection:
         log.info("[%s] combate livre: enviando centro.ir (farm pausado)", self.acc.name)
 
     def _pick_best_hunt_for_level(self) -> dict | None:
-        """Escolhe a melhor hunt liberada pelo nível do treinador (respeitando filtro de região)."""
+        """Escolhe a melhor hunt liberada pelo nível do treinador (respeitando região e prioridade)."""
+        from maps import region_of_hunt
+
         level = int(self.estado.get("level") or 0)
         region_filter = (self.acc.auto_best_hunt_region or "all").strip().lower()
+        priority = (self.acc.auto_best_hunt_priority or "xp").strip()
         candidates: list[dict] = []
         for h in self.hunts:
             if not isinstance(h, dict) or not h.get("slug"):
@@ -898,14 +901,36 @@ class AccountConnection:
             req_lvl = int(h.get("nivel") or 0)
             if req_lvl > level:
                 continue
-            if region_filter != "all":
-                h_reg = str(h.get("regiao") or h.get("area") or "").strip().lower()
-                if h_reg != region_filter:
-                    continue
+            h_reg = (region_of_hunt(h) or str(h.get("regiao") or h.get("area") or "")).strip().lower()
+            if region_filter != "all" and h_reg != region_filter:
+                continue
             candidates.append(h)
         if not candidates:
             return None
-        candidates.sort(key=lambda h: (int(h.get("nivel") or 0), int(h.get("totalSpawns") or 0)), reverse=True)
+
+        if region_filter == "all":
+            if priority == "fragmento":
+                outland_only = [h for h in candidates if (region_of_hunt(h) or "").lower() == "outland"]
+                if outland_only:
+                    candidates = outland_only
+            elif priority == "shiny":
+                non_outland = [h for h in candidates if (region_of_hunt(h) or "").lower() != "outland"]
+                if non_outland:
+                    candidates = non_outland
+
+        if priority == "shiny":
+            candidates.sort(key=lambda h: (int(h.get("totalSpawns") or 0), int(h.get("nivel") or 0)), reverse=True)
+        elif priority == "ouro":
+            candidates.sort(
+                key=lambda h: (
+                    max(1, int(h.get("nivel") or 0)) * max(1, int(h.get("totalSpawns") or 1)),
+                    int(h.get("nivel") or 0),
+                    int(h.get("totalSpawns") or 0),
+                ),
+                reverse=True,
+            )
+        else:
+            candidates.sort(key=lambda h: (int(h.get("nivel") or 0), int(h.get("totalSpawns") or 0)), reverse=True)
         return candidates[0]
 
     async def _check_auto_hunt(self) -> None:

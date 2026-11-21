@@ -131,41 +131,42 @@ def atlas_payload(j: dict) -> dict:
 
 
 def equipped_rows(c: "AccountConnection") -> dict:
-    """Poção e Ball equipadas no momento (com quantidade), p/ os cards do dashboard."""
-    from shop import KNOWN_POTION_IDS  # evita ciclo em import-time
+    """Poção, Ball e Revive equipados no momento (com quantidade), p/ os cards do dashboard."""
+    from shop import KNOWN_POTION_IDS, KNOWN_REVIVE_IDS  # evita ciclo em import-time
 
     est = c.estado
     pk = c.hunt.active_pokemon()
     auto = est.get("automation") or {}
 
+    def _item_opt(i: int) -> dict:
+        nos = c.itens_nossos.get(i) or {}
+        return {"id": i, "name": nos.get("name") or item_name(i),
+                "qty": int((est.get("items") or {}).get(str(i), 0) or 0), "icon": _abs(nos.get("icon") or item_icon_path(i))}
+
     held = pk.get("heldItemId") if pk else None
     # A automação do jogo é a verdade (o jogador pode trocar a poção lá): só cai na escolha guardada se ela vier vazia.
     potion_id = next((i for i in auto.get("potionIds", []) if i in KNOWN_POTION_IDS), None)
     potion_id = potion_id or c.acc.potion_id or (held if held in KNOWN_POTION_IDS else None)
-    potion = None
-    if potion_id is not None:
-        nos = c.itens_nossos.get(potion_id) or {}
-        icon = nos.get("icon") or item_icon_path(potion_id)
-        potion = {"id": potion_id, "name": nos.get("name") or item_name(potion_id),
-                  "qty": int((est.get("items") or {}).get(str(potion_id), 0) or 0), "icon": _abs(icon)}
+    potion = _item_opt(potion_id) if potion_id is not None else None
 
     ball_id = c.acc.ball_id or next(iter(auto.get("ballIds", [])), None) or next(iter(c.acc.ball_priority), None)
     ball = None
     if ball_id is not None:
         ball = {"id": ball_id, "name": ball_name(ball_id),
                 "qty": int((est.get("balls") or {}).get(str(ball_id), 0) or 0), "icon": _abs(BALL_ICONS.get(ball_id))}
-    # Opções do seletor do card (clicar na poção/bola): todas as poções e bolas do jogo, com o estoque da conta.
-    def _potion_opt(i: int) -> dict:
-        nos = c.itens_nossos.get(i) or {}
-        return {"id": i, "name": nos.get("name") or item_name(i),
-                "qty": int((est.get("items") or {}).get(str(i), 0) or 0), "icon": _abs(nos.get("icon") or item_icon_path(i))}
 
+    revive_id = next((i for i in (auto.get("reviveIds") or []) if i in KNOWN_REVIVE_IDS), None)
+    revive_id = revive_id or (c.acc.revive_id if c.acc.revive_id in KNOWN_REVIVE_IDS else None) or 205
+    revive = _item_opt(revive_id) if revive_id is not None else None
+
+    # Opções do seletor do card (clicar na poção/bola/revive): todos os itens do jogo, com o estoque da conta.
     options = {
-        "potion": [_potion_opt(i) for i in sorted(KNOWN_POTION_IDS)],
+        "potion": [_item_opt(i) for i in sorted(KNOWN_POTION_IDS)],
         "ball": [{"id": i, "name": ball_name(i), "qty": int((est.get("balls") or {}).get(str(i), 0) or 0),
                   "icon": _abs(BALL_ICONS.get(i))} for i in sorted(BALL_ICONS)],
+        "revive": [_item_opt(i) for i in sorted(KNOWN_REVIVE_IDS)],
     }
-    return {"potion": potion, "ball": ball, "options": options}
+    return {"potion": potion, "ball": ball, "revive": revive, "options": options}
 
 
 def _pending_hunt(c: "AccountConnection") -> dict | None:
@@ -276,6 +277,7 @@ def _automation_snapshot(c: "AccountConnection") -> dict:
         "huntSlug": c.acc.hunt_slug or "",
         "autoBestHunt": bool(c.acc.auto_best_hunt),
         "autoBestHuntRegion": c.acc.auto_best_hunt_region or "all",
+        "autoBestHuntPriority": c.acc.auto_best_hunt_priority or "xp",
         "autoPassClaim": bool(c.acc.auto_pass_claim),
         "gameAutoPotion": bool(auto.get("autoPotion", True)),
         "gameAutoRevive": bool(auto.get("autoRevive", False)),

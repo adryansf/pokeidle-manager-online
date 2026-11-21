@@ -192,6 +192,7 @@ export type AutomationPatch = Partial<{
   huntSlug: string;
   autoBestHunt: boolean;
   autoBestHuntRegion: string;
+  autoBestHuntPriority: "xp" | "xpTreinador" | "ouro" | "shiny" | "fragmento" | string;
   autoPassClaim: boolean;
   gameAutoPotion: boolean;
   gameAutoRevive: boolean;
@@ -201,7 +202,7 @@ export type AutomationPatch = Partial<{
 }>;
 
 export const actions = {
-  equip: (accId: string, kind: "ball" | "potion", id: number) =>
+  equip: (accId: string, kind: "ball" | "potion" | "revive", id: number) =>
     call<EquipResult>("POST", `/api/accounts/${numId(accId)}/equip`, { kind, id }),
   setActivePokemon: (accId: string, pokemonId: number) =>
     call<{ ok: boolean; confirmed: boolean; pokemonId: number }>(
@@ -240,7 +241,7 @@ export const actions = {
   bulkPause: (paused: boolean) => call<{ ok: boolean; paused: boolean; count: number }>("POST", "/api/bulk/pause", { paused }),
   bulkFarmPause: (paused: boolean) => call<{ ok: boolean; farmPaused: boolean; count: number }>("POST", "/api/bulk/farm-pause", { paused }),
   bulkCenter: () => call<{ ok: boolean; sent: string[]; skipped: string[] }>("POST", "/api/bulk/center"),
-  bulkEquip: (kind: "ball" | "potion", id: number) =>
+  bulkEquip: (kind: "ball" | "potion" | "revive", id: number) =>
     call<{ ok: boolean; updated: string[]; skipped: string[] }>("POST", "/api/bulk/equip", { kind, id }),
   bulkHunt: (slug: string) =>
     call<{ ok: boolean; sent: string[]; queued: string[]; skipped: string[] }>("POST", "/api/bulk/hunt", { slug }),

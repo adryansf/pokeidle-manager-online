@@ -129,6 +129,7 @@ class AccountConfig:
     auto_center_hp_pct: int = 20     # limiar de HP (%) para acionar o Auto-Centro de emergência
     auto_best_hunt: bool = False     # troca automaticamente para a melhor hunt liberada ao subir de nível
     auto_best_hunt_region: str = "all"  # filtro de região para auto_best_hunt ("all", "kanto", "outland", ...)
+    auto_best_hunt_priority: str = "xp" # prioridade: "xp", "xpTreinador", "ouro", "shiny", "fragmento"
     auto_pass_claim: bool = False    # resgata automaticamente o Passe de Batalha quando disponível
     pvp_auto: bool = False           # entra sozinho na fila do PVP ranqueado
 
@@ -167,6 +168,7 @@ OPTION_DEFAULTS: dict = {
     "auto_center_hp_pct": 20,
     "auto_best_hunt": False,
     "auto_best_hunt_region": "all",
+    "auto_best_hunt_priority": "xp",
     "auto_pass_claim": False,
     "pvp_auto": False,
 }
@@ -209,6 +211,7 @@ def build_account_config(d: dict) -> AccountConfig:
         auto_center_hp_pct=min(max(int(o.get("auto_center_hp_pct") or 20), 5), 80),
         auto_best_hunt=bool(o.get("auto_best_hunt", False)),
         auto_best_hunt_region=str(o.get("auto_best_hunt_region") or "all").strip().lower() or "all",
+        auto_best_hunt_priority=str(o.get("auto_best_hunt_priority") or "xp").strip() or "xp",
         auto_pass_claim=bool(o.get("auto_pass_claim", False)),
         pvp_auto=bool(o["pvp_auto"]),
     )

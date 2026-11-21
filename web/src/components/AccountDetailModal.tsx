@@ -248,6 +248,7 @@ export function AccountDetailModal({
     autoCenterHpPct: string;
     huntSlug: string;
     autoBestHuntRegion: string;
+    autoBestHuntPriority: string;
   }>({
     hpLimiarPct: "40",
     potionThreshold: "10",
@@ -261,6 +262,7 @@ export function AccountDetailModal({
     autoCenterHpPct: "20",
     huntSlug: "",
     autoBestHuntRegion: "all",
+    autoBestHuntPriority: "xp",
   });
 
   useEffect(() => {
@@ -279,6 +281,7 @@ export function AccountDetailModal({
       autoCenterHpPct: String(a.autoCenterHpPct ?? 20),
       huntSlug: a.huntSlug ?? "",
       autoBestHuntRegion: a.autoBestHuntRegion ?? "all",
+      autoBestHuntPriority: a.autoBestHuntPriority ?? "xp",
     });
     // Sincroniza quando abre o modal ou muda de conta
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -873,48 +876,72 @@ export function AccountDetailModal({
                             </div>
                           </label>
 
-                          <label className="block space-y-1">
-                            <span className="text-[11px] font-bold text-mute">
-                              Região do Auto-Melhor Hunt
-                            </span>
-                            <div className="flex gap-1.5">
-                              <select
-                                className="field flex-1 text-xs sm:text-sm"
-                                value={autoDraft.autoBestHuntRegion}
-                                onChange={(e) => setAutoDraft({ ...autoDraft, autoBestHuntRegion: e.target.value })}
-                              >
-                                <option value="all">Todas as regiões</option>
-                                <option value="kanto">Kanto</option>
-                                <option value="outland">Outland</option>
-                                <option value="johto">Johto</option>
-                                <option value="hoenn">Hoenn</option>
-                                <option value="sinnoh">Sinnoh</option>
-                                <option value="unova">Unova</option>
-                              </select>
-                              <button
-                                type="button"
-                                disabled={busyKey === "autoBestHuntRegion"}
-                                onClick={async () => {
-                                  setBusyKey("autoBestHuntRegion");
-                                  setMsg(null);
-                                  try {
-                                    await actions.setAutomation(accId, {
-                                      autoBestHunt: true,
-                                      autoBestHuntRegion: autoDraft.autoBestHuntRegion,
-                                    });
-                                    setMsg({ tone: "ok", text: "Auto-Melhor Hunt atualizado e ativado!" });
-                                  } catch (e) {
-                                    setMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao atualizar região" });
-                                  } finally {
-                                    setBusyKey(null);
-                                  }
-                                }}
-                                className="btn shrink-0 px-2.5 text-xs font-bold"
-                              >
-                                Salvar
-                              </button>
+                          <div className="space-y-2">
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <label className="block space-y-1">
+                                <span className="text-[11px] font-bold text-mute">
+                                  Prioridade do Auto-Hunt
+                                </span>
+                                <select
+                                  className="field w-full text-xs sm:text-sm"
+                                  value={autoDraft.autoBestHuntPriority}
+                                  onChange={(e) => setAutoDraft({ ...autoDraft, autoBestHuntPriority: e.target.value })}
+                                >
+                                  <option value="xp">XP/h (Pokémon)</option>
+                                  <option value="xpTreinador">XP/h (Treinador)</option>
+                                  <option value="ouro">Ouro/h</option>
+                                  <option value="shiny">Shiny/h</option>
+                                  <option value="fragmento">Fragmento/h</option>
+                                </select>
+                              </label>
+                              <label className="block space-y-1">
+                                <span className="text-[11px] font-bold text-mute">
+                                  Região do Auto-Hunt
+                                </span>
+                                <select
+                                  className="field w-full text-xs sm:text-sm"
+                                  value={autoDraft.autoBestHuntRegion}
+                                  onChange={(e) => setAutoDraft({ ...autoDraft, autoBestHuntRegion: e.target.value })}
+                                >
+                                  <option value="all">Todas as regiões</option>
+                                  <option value="kanto">Kanto</option>
+                                  <option value="outland">Outland</option>
+                                  <option value="johto">Johto</option>
+                                  <option value="hoenn">Hoenn</option>
+                                  <option value="sinnoh">Sinnoh</option>
+                                  <option value="unova">Unova</option>
+                                  <option value="kalos">Kalos</option>
+                                  <option value="alola">Alola</option>
+                                  <option value="galar">Galar</option>
+                                  <option value="paldea">Paldea</option>
+                                  <option value="orre">Orre</option>
+                                </select>
+                              </label>
                             </div>
-                          </label>
+                            <button
+                              type="button"
+                              disabled={busyKey === "autoBestHuntRegion"}
+                              onClick={async () => {
+                                setBusyKey("autoBestHuntRegion");
+                                setMsg(null);
+                                try {
+                                  await actions.setAutomation(accId, {
+                                    autoBestHunt: true,
+                                    autoBestHuntRegion: autoDraft.autoBestHuntRegion,
+                                    autoBestHuntPriority: autoDraft.autoBestHuntPriority,
+                                  });
+                                  setMsg({ tone: "ok", text: "Auto-Melhor Hunt atualizado e ativado!" });
+                                } catch (e) {
+                                  setMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao atualizar Auto-Hunt" });
+                                } finally {
+                                  setBusyKey(null);
+                                }
+                              }}
+                              className="btn w-full px-2.5 text-xs font-bold"
+                            >
+                              Salvar e ativar Auto-Hunt
+                            </button>
+                          </div>
                         </div>
                       </div>
 

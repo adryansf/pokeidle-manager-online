@@ -61,6 +61,7 @@ export interface AccountAutomation {
   huntSlug?: string;
   autoBestHunt?: boolean;
   autoBestHuntRegion?: string;
+  autoBestHuntPriority?: "xp" | "xpTreinador" | "ouro" | "shiny" | "fragmento" | string;
   autoPassClaim?: boolean;
   gameAutoPotion: boolean;
   gameAutoRevive?: boolean;
@@ -167,8 +168,9 @@ export interface AccountSnapshot {
   equipped?: {
     potion: EquippedItem | null;
     ball: EquippedItem | null;
+    revive?: EquippedItem | null;
     /** Tudo que dá para equipar (com o estoque da conta): alimenta o seletor do card. */
-    options?: { potion: EquippedItem[]; ball: EquippedItem[] };
+    options?: { potion: EquippedItem[]; ball: EquippedItem[]; revive?: EquippedItem[] };
   };
   captured?: { session: number; failed: number; total: number; shiny: number };
   inventory?: {

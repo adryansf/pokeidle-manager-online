@@ -96,6 +96,7 @@ const sameAccount = (a: AccountSnapshot, b: AccountSnapshot) =>
   a.pokemon?.hp === b.pokemon?.hp &&
   a.pokemon?.maxHp === b.pokemon?.maxHp &&
   JSON.stringify(a.team) === JSON.stringify(b.team) &&
+  JSON.stringify(a.equipped) === JSON.stringify(b.equipped) &&
   JSON.stringify(a.boosts) === JSON.stringify(b.boosts) &&
   JSON.stringify(a.automation) === JSON.stringify(b.automation);
 

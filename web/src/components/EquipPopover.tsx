@@ -11,7 +11,7 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 const W = 288;
 const BEAST_BALL = 5; // não é vendida na loja: o bot não consegue repor
 
-/** Lista de poções ou bolas para trocar a equipada. Abre ancorada no bloco clicado (fora do card, para não ser cortada). */
+/** Lista de poções, bolas ou revives para trocar o equipado. Abre ancorada no bloco clicado (fora do card, para não ser cortada). */
 export function EquipPopover({
   kind,
   accId,
@@ -20,7 +20,7 @@ export function EquipPopover({
   anchor,
   onClose,
 }: {
-  kind: "ball" | "potion";
+  kind: "ball" | "potion" | "revive";
   accId: string;
   options: EquippedItem[];
   selectedId?: number;
@@ -30,7 +30,8 @@ export function EquipPopover({
   const [busy, setBusy] = useState<number | null>(null);
   const [note, setNote] = useState<{ tone: "ok" | "warn" | "err"; text: string } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-  const label = kind === "ball" ? "Bola" : "Poção";
+  const label = kind === "ball" ? "Bola" : kind === "revive" ? "Revive" : "Poção";
+  const eqWord = kind === "revive" ? "equipado" : "equipada";
 
   useEffect(() => {
     const out = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && onClose();
@@ -59,10 +60,10 @@ export function EquipPopover({
     setNote(null);
     try {
       const r = await actions.equip(accId, kind, o.id);
-      if (r.willBuy) setNote({ tone: "ok", text: `${o.name} equipada. Sem estoque suficiente: o bot vai comprar.` });
-      else if (!r.buyable && r.stock === 0) setNote({ tone: "warn", text: `${o.name} equipada, mas não é vendida na loja e o estoque acabou.` });
-      else if (!r.restockEnabled && r.stock === 0) setNote({ tone: "warn", text: `${o.name} equipada, mas a reposição automática desta conta está desligada.` });
-      else setNote({ tone: "ok", text: `${o.name} equipada.` });
+      if (r.willBuy) setNote({ tone: "ok", text: `${o.name} ${eqWord}. Sem estoque suficiente: o bot vai comprar.` });
+      else if (!r.buyable && r.stock === 0) setNote({ tone: "warn", text: `${o.name} ${eqWord}, mas não é vendida na loja e o estoque acabou.` });
+      else if (!r.restockEnabled && r.stock === 0) setNote({ tone: "warn", text: `${o.name} ${eqWord}, mas a reposição automática desta conta está desligada.` });
+      else setNote({ tone: "ok", text: `${o.name} ${eqWord}.` });
       setTimeout(onClose, 1400);
     } catch (e) {
       setNote({ tone: "err", text: e instanceof Error ? e.message : "Não foi possível trocar." });
@@ -75,7 +76,7 @@ export function EquipPopover({
     <motion.div
       ref={ref}
       role="dialog"
-      aria-label={`Trocar ${label.toLowerCase()} equipada`}
+      aria-label={`Trocar ${label.toLowerCase()} ${eqWord}`}
       initial={{ opacity: 0, y: below ? -6 : 6, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.12 } }}
@@ -83,7 +84,7 @@ export function EquipPopover({
       style={{ left, top, width: W, transformOrigin: below ? "top left" : "bottom left" }}
       className="card fixed z-[60] p-2"
     >
-      <div className="px-1.5 pb-1.5 pt-0.5 text-xs font-bold uppercase tracking-wide text-mute">{label} equipada</div>
+      <div className="px-1.5 pb-1.5 pt-0.5 text-xs font-bold uppercase tracking-wide text-mute">{label} {eqWord}</div>
       <ul className="space-y-1">
         {options.map((o) => {
           const on = o.id === selectedId;

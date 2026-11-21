@@ -63,6 +63,7 @@ class OptionsIn(BaseModel):
     auto_center_hp_pct: int | None = Field(None, ge=5, le=80)
     auto_best_hunt: bool | None = None
     auto_best_hunt_region: str | None = Field(None, max_length=32)
+    auto_best_hunt_priority: str | None = Field(None, max_length=24)
     pvp_auto: bool | None = None
 
 

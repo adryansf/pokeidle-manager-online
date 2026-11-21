@@ -276,14 +276,15 @@ function EquipChip({ item, label, onPress, block = false }: { item?: EquippedIte
 
 function ResumoBody({ id, variant }: { id: string; variant: CardStyle }) {
   const acc = useAccount(id);
-  const [picker, setPicker] = useState<{ kind: "ball" | "potion"; anchor: DOMRect } | null>(null);
+  const [picker, setPicker] = useState<{ kind: "ball" | "potion" | "revive"; anchor: DOMRect } | null>(null);
   if (!acc) return null;
   const potion = acc.equipped?.potion;
   const ball = acc.equipped?.ball;
+  const revive = acc.equipped?.revive;
   const options = acc.equipped?.options;
   // Abates por hora da hunt atual (só depois de 1 minuto, para o número não oscilar no começo).
   const killsPerHour = acc.hunt && acc.hunt.minutes >= 1 ? Math.round(acc.hunt.kills / (acc.hunt.minutes / 60)) : null;
-  const open = (kind: "ball" | "potion") => (el: HTMLElement) => setPicker({ kind, anchor: el.getBoundingClientRect() });
+  const open = (kind: "ball" | "potion" | "revive") => (el: HTMLElement) => setPicker({ kind, anchor: el.getBoundingClientRect() });
   const pk = acc.pokemon;
   const trainer = { level: acc.level, bar: acc.xp, perHour: acc.xpPerHour };
   const mon = { level: pk?.level, bar: pk?.xp, name: pk?.name, fallbackPerHour: acc.xpPerHour };
@@ -312,12 +313,14 @@ function ResumoBody({ id, variant }: { id: string; variant: CardStyle }) {
     <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
       <EquipChip item={potion} label="Poção equipada" onPress={options ? open("potion") : undefined} />
       <EquipChip item={ball} label="Bola equipada" onPress={options ? open("ball") : undefined} />
+      <EquipChip item={revive} label="Revive equipado" onPress={options?.revive ? open("revive") : undefined} />
     </div>
   );
   const chipsBlock = (
     <>
       <EquipChip item={potion} label="Poção equipada" onPress={options ? open("potion") : undefined} block />
       <EquipChip item={ball} label="Bola equipada" onPress={options ? open("ball") : undefined} block />
+      <EquipChip item={revive} label="Revive equipado" onPress={options?.revive ? open("revive") : undefined} block />
     </>
   );
   const huntKills =
@@ -339,8 +342,8 @@ function ResumoBody({ id, variant }: { id: string; variant: CardStyle }) {
           key={picker.kind}
           kind={picker.kind}
           accId={id}
-          options={options[picker.kind]}
-          selectedId={(picker.kind === "ball" ? ball : potion)?.id}
+          options={options[picker.kind] ?? []}
+          selectedId={(picker.kind === "ball" ? ball : picker.kind === "revive" ? revive : potion)?.id}
           anchor={picker.anchor}
           onClose={() => setPicker(null)}
         />
@@ -364,6 +367,9 @@ function ResumoBody({ id, variant }: { id: string; variant: CardStyle }) {
         <Tile icon={<ItemSprite icon={ball?.icon} size={32} alt={ball?.name} />} className="order-5 sm:order-none" label="Bola equipada" hint={ball ? `Bola equipada: ${ball.name}. Clique para trocar` : "Clique para escolher a bola"} onPress={options ? open("ball") : undefined}>
           <Equipped item={ball} />
         </Tile>
+        <Tile icon={<ItemSprite icon={revive?.icon} size={32} alt={revive?.name} />} className="order-7 sm:order-none" label="Revive equipado" hint={revive ? `Revive equipado: ${revive.name}. Clique para trocar` : "Clique para escolher o revive"} onPress={options?.revive ? open("revive") : undefined}>
+          <Equipped item={revive} />
+        </Tile>
         <Tile icon={<Star className="size-full fill-poke-gold text-poke-gold" />} label="XP por hora" className="tile-green order-1 sm:order-none">
           <span className="text-poke-green">
             +<AnimatedNumber value={acc.xpPerHour} />
@@ -376,7 +382,7 @@ function ResumoBody({ id, variant }: { id: string; variant: CardStyle }) {
             <span className="hidden sm:inline"> Ouro/h</span>
           </span>
         </Tile>
-        <Tile icon={<Swords className="size-full text-fg" />} label="Abates por hora" className="order-7 col-span-full sm:order-none">
+        <Tile icon={<Swords className="size-full text-fg" />} label="Abates por hora" className="order-8 col-span-2 sm:col-span-1 sm:order-none">
           <span className="flex items-baseline justify-between gap-2">
             <span className="text-fg">
               {killsPerHour == null ? "—" : <AnimatedNumber value={killsPerHour} />}
@@ -932,102 +938,145 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
         </div>
       )}
 
-      {/* Automação em tempo real (1 clique para ativar/desativar direto no card) */}
+      {/* Automação em tempo real (separada em Auto-Usar vs Auto-Comprar para leitura imediata) */}
       {acc.automation && (
-        <div className="mt-2 flex flex-wrap items-center gap-1">
-          {(
-            [
-              ["autoCatch", "Captura", acc.automation.autoCatch, { autoCatch: !acc.automation.autoCatch }, "Captura automática de selvagens"],
+        <div className="mt-2 space-y-1.5">
+          {/* Linha 1: Auto-Usar / Ações em jogo */}
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-mute">Auto-Usar</span>
+            {(
               [
-                "gameAutoPotion",
-                acc.automation.hpLimiarPct != null ? `Cura ≤${acc.automation.hpLimiarPct}%` : "Cura",
-                acc.automation.gameAutoPotion,
-                { gameAutoPotion: !acc.automation.gameAutoPotion },
-                `Cura automática do jogo (usa a poção equipada quando HP ≤ ${acc.automation.hpLimiarPct ?? 40}%). Abra Detalhes → Automação para ajustar a %.`,
-              ],
+                [
+                  "gameAutoPotion",
+                  acc.automation.hpLimiarPct != null ? `Poção ≤${acc.automation.hpLimiarPct}%` : "Poção",
+                  acc.automation.gameAutoPotion,
+                  { gameAutoPotion: !acc.automation.gameAutoPotion },
+                  `Usar poção equipada automaticamente quando HP ≤ ${acc.automation.hpLimiarPct ?? 40}% (configuração nativa do jogo).`,
+                ],
+                [
+                  "gameAutoRevive",
+                  "Revive",
+                  Boolean(acc.automation.gameAutoRevive),
+                  { gameAutoRevive: !acc.automation.gameAutoRevive },
+                  "Usar Revive automaticamente ao desmaiar (configuração nativa do jogo).",
+                ],
+                ["autoCatch", "Capturar", acc.automation.autoCatch, { autoCatch: !acc.automation.autoCatch }, "Lançar Pokébola automaticamente em selvagens."],
+                ["autoPotionFallback", "Fallback Poção", acc.automation.autoPotionFallback, { autoPotionFallback: !acc.automation.autoPotionFallback }, "Trocar para próxima poção disponível na mochila se a atual zerar."],
+                ["autoCenter", `Centro ≤${acc.automation.autoCenterHpPct}%`, acc.automation.autoCenter, { autoCenter: !acc.automation.autoCenter }, "Ir ao Centro Pokémon automaticamente em emergência sem poções."],
+                [
+                  "autoBestHunt",
+                  acc.automation.autoBestHunt
+                    ? `Hunt (${({ xp: "XP", xpTreinador: "XP Tr.", ouro: "Ouro", shiny: "Shiny", fragmento: "Frag." } as Record<string, string>)[acc.automation.autoBestHuntPriority || "xp"] ?? "XP"}${acc.automation.autoBestHuntRegion && acc.automation.autoBestHuntRegion !== "all" ? ` · ${acc.automation.autoBestHuntRegion}` : ""})`
+                    : "Melhor Hunt",
+                  Boolean(acc.automation.autoBestHunt),
+                  { autoBestHunt: !acc.automation.autoBestHunt },
+                  `Trocar automaticamente para a melhor hunt liberada (prioridade: ${acc.automation.autoBestHuntPriority || "xp"}, região: ${acc.automation.autoBestHuntRegion || "all"}).`,
+                ],
+                ["autoPassClaim", "Passe", Boolean(acc.automation.autoPassClaim), { autoPassClaim: !acc.automation.autoPassClaim }, "Resgatar automaticamente o Passe de Batalha quando disponível."],
+              ] as [string, string, boolean, AutomationPatch, string][]
+            ).map(([key, label, on, patch, tip]) => (
+              <button
+                key={key}
+                type="button"
+                disabled={autoBusy === key || ((key === "gameAutoPotion" || key === "gameAutoRevive") && acc.status !== "online")}
+                title={`${tip} — clique para ${on ? "desativar" : "ativar"}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (justDragged() || autoBusy) return;
+                  setAutoBusy(key);
+                  void actions.setAutomation(id, patch).finally(() => setAutoBusy(null));
+                }}
+                className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors active:scale-95 disabled:opacity-50 ${
+                  on
+                    ? "border-[#2f6b3a] bg-[#16301c]/80 text-poke-green hover:bg-[#1e4226]"
+                    : "border-line bg-void/60 text-mute/75 hover:border-edge hover:text-fg"
+                }`}
+              >
+                <span className={`size-1.5 rounded-full ${on ? "bg-poke-green" : "bg-mute/60"}`} />
+                {label}
+              </button>
+            ))}
+            {acc.status === "online" && (
+              <button
+                type="button"
+                disabled={autoBusy === "farmPause"}
+                title={acc.farmPaused ? "Retomar o farm na hunt anterior" : "Pausar farm: vai ao Pokécentro e fica parado (conta continua online)"}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (justDragged() || autoBusy) return;
+                  setAutoBusy("farmPause");
+                  void actions.farmPause(id, !acc.farmPaused).finally(() => setAutoBusy(null));
+                }}
+                className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors active:scale-95 disabled:opacity-50 ${
+                  acc.farmPaused
+                    ? "border-[#7a5a1c] bg-[#33260e] text-poke-gold hover:bg-[#463413]"
+                    : "border-line bg-void/60 text-mute/80 hover:border-edge hover:text-poke-gold"
+                }`}
+              >
+                🏥 {acc.farmPaused ? "Retomar farm" : "Pausar farm"}
+              </button>
+            )}
+          </div>
+
+          {/* Linha 2: Auto-Comprar / Reposição na loja */}
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-mute">Auto-Comprar</span>
+            {(
               [
-                "gameAutoRevive",
-                "Revive",
-                Boolean(acc.automation.gameAutoRevive),
-                { gameAutoRevive: !acc.automation.gameAutoRevive },
-                "Usar Revive automaticamente ao desmaiar (configuração nativa do jogo)",
-              ],
-              [
-                "autoPotion",
-                acc.automation.autoPotion
-                  ? `Auto-Poção (<${acc.automation.potionThreshold}→+${acc.automation.potionQty})`
-                  : "Auto-Poção",
-                acc.automation.autoPotion,
-                { autoPotion: !acc.automation.autoPotion },
-                `Autocompra de poções: compra ${acc.automation.potionQty} un. quando estoque ficar abaixo de ${acc.automation.potionThreshold}${acc.automation.goldReserve > 0 ? ` (piso ${fmtShort(acc.automation.goldReserve)}g)` : ""}.`,
-              ],
-              [
-                "autoBallRestock",
-                acc.automation.autoBallRestock
-                  ? `Auto-Bola (<${acc.automation.ballThreshold}→+${acc.automation.ballQty})`
-                  : "Auto-Bola",
-                acc.automation.autoBallRestock,
-                { autoBallRestock: !acc.automation.autoBallRestock },
-                `Autocompra de Pokébolas: compra ${acc.automation.ballQty} un. quando estoque ficar abaixo de ${acc.automation.ballThreshold}${acc.automation.goldReserve > 0 ? ` (piso ${fmtShort(acc.automation.goldReserve)}g)` : ""}.`,
-              ],
-              [
-                "autoReviveRestock",
-                acc.automation.autoReviveRestock
-                  ? `Auto-Revive (<${acc.automation.reviveThreshold ?? 5}→+${acc.automation.reviveQty ?? 20})`
-                  : "Auto-Revive",
-                Boolean(acc.automation.autoReviveRestock),
-                { autoReviveRestock: !acc.automation.autoReviveRestock },
-                `Autocompra de ${acc.automation.reviveId === 206 ? "Max Revive" : "Revive"}: compra ${acc.automation.reviveQty ?? 20} un. quando estoque ficar abaixo de ${acc.automation.reviveThreshold ?? 5}.`,
-              ],
-              ["autoPotionFallback", "Fallback", acc.automation.autoPotionFallback, { autoPotionFallback: !acc.automation.autoPotionFallback }, "Trocar para próxima poção disponível se zerar"],
-              ["autoCenter", `Centro ≤${acc.automation.autoCenterHpPct}%`, acc.automation.autoCenter, { autoCenter: !acc.automation.autoCenter }, "Auto-Centro Pokémon de emergência sem poções"],
-              ["autoBestHunt", acc.automation.autoBestHunt ? `Auto-Hunt (${acc.automation.autoBestHuntRegion || "all"})` : "Auto-Hunt", Boolean(acc.automation.autoBestHunt), { autoBestHunt: !acc.automation.autoBestHunt }, "Trocar automaticamente para a melhor hunt liberada ao subir de nível"],
-              ["autoPassClaim", "Auto-Passe", Boolean(acc.automation.autoPassClaim), { autoPassClaim: !acc.automation.autoPassClaim }, "Resgatar automaticamente o Passe de Batalha quando disponível"],
-            ] as [string, string, boolean, AutomationPatch, string][]
-          ).map(([key, label, on, patch, tip]) => (
-            <button
-              key={key}
-              type="button"
-              disabled={autoBusy === key || ((key === "gameAutoPotion" || key === "gameAutoRevive") && acc.status !== "online")}
-              title={`${tip} — clique para ${on ? "desativar" : "ativar"}`}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (justDragged() || autoBusy) return;
-                setAutoBusy(key);
-                void actions.setAutomation(id, patch).finally(() => setAutoBusy(null));
-              }}
-              className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors active:scale-95 disabled:opacity-50 ${
-                on
-                  ? "border-[#2f6b3a] bg-[#16301c]/80 text-poke-green hover:bg-[#1e4226]"
-                  : "border-line bg-void/60 text-mute/75 hover:border-edge hover:text-fg"
-              }`}
-            >
-              <span className={`size-1.5 rounded-full ${on ? "bg-poke-green" : "bg-mute/60"}`} />
-              {label}
-            </button>
-          ))}
-          {acc.status === "online" && (
-            <button
-              type="button"
-              disabled={autoBusy === "farmPause"}
-              title={acc.farmPaused ? "Retomar o farm na hunt anterior" : "Pausar farm: vai ao Pokécentro e fica parado (conta continua online)"}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (justDragged() || autoBusy) return;
-                setAutoBusy("farmPause");
-                void actions.farmPause(id, !acc.farmPaused).finally(() => setAutoBusy(null));
-              }}
-              className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors active:scale-95 disabled:opacity-50 ${
-                acc.farmPaused
-                  ? "border-[#7a5a1c] bg-[#33260e] text-poke-gold hover:bg-[#463413]"
-                  : "border-line bg-void/60 text-mute/80 hover:border-edge hover:text-poke-gold"
-              }`}
-            >
-              🏥 {acc.farmPaused ? "Retomar farm" : "Pausar farm"}
-            </button>
-          )}
+                [
+                  "autoPotion",
+                  acc.automation.autoPotion
+                    ? `🛒 Poção (<${acc.automation.potionThreshold}→+${acc.automation.potionQty})`
+                    : "🛒 Poção",
+                  acc.automation.autoPotion,
+                  { autoPotion: !acc.automation.autoPotion },
+                  `Autocompra de poções na loja: compra ${acc.automation.potionQty} un. quando estoque ficar abaixo de ${acc.automation.potionThreshold}${acc.automation.goldReserve > 0 ? ` (piso ${fmtShort(acc.automation.goldReserve)}g)` : ""}.`,
+                ],
+                [
+                  "autoBallRestock",
+                  acc.automation.autoBallRestock
+                    ? `🛒 Bola (<${acc.automation.ballThreshold}→+${acc.automation.ballQty})`
+                    : "🛒 Bola",
+                  acc.automation.autoBallRestock,
+                  { autoBallRestock: !acc.automation.autoBallRestock },
+                  `Autocompra de Pokébolas na loja: compra ${acc.automation.ballQty} un. quando estoque ficar abaixo de ${acc.automation.ballThreshold}${acc.automation.goldReserve > 0 ? ` (piso ${fmtShort(acc.automation.goldReserve)}g)` : ""}.`,
+                ],
+                [
+                  "autoReviveRestock",
+                  acc.automation.autoReviveRestock
+                    ? `🛒 ${acc.automation.reviveId === 206 ? "Max Revive" : "Revive"} (<${acc.automation.reviveThreshold ?? 5}→+${acc.automation.reviveQty ?? 20})`
+                    : `🛒 ${acc.automation.reviveId === 206 ? "Max Revive" : "Revive"}`,
+                  Boolean(acc.automation.autoReviveRestock),
+                  { autoReviveRestock: !acc.automation.autoReviveRestock },
+                  `Autocompra de ${acc.automation.reviveId === 206 ? "Max Revive" : "Revive"} na loja: compra ${acc.automation.reviveQty ?? 20} un. quando estoque ficar abaixo de ${acc.automation.reviveThreshold ?? 5}.`,
+                ],
+              ] as [string, string, boolean, AutomationPatch, string][]
+            ).map(([key, label, on, patch, tip]) => (
+              <button
+                key={key}
+                type="button"
+                disabled={autoBusy === key}
+                title={`${tip} — clique para ${on ? "desativar" : "ativar"}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (justDragged() || autoBusy) return;
+                  setAutoBusy(key);
+                  void actions.setAutomation(id, patch).finally(() => setAutoBusy(null));
+                }}
+                className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors active:scale-95 disabled:opacity-50 ${
+                  on
+                    ? "border-[#7a5a1c] bg-[#33260e]/85 text-poke-gold hover:bg-[#463413]"
+                    : "border-line bg-void/60 text-mute/75 hover:border-edge hover:text-fg"
+                }`}
+              >
+                <span className={`size-1.5 rounded-full ${on ? "bg-poke-gold" : "bg-mute/60"}`} />
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

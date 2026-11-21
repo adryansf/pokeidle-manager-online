@@ -38,7 +38,7 @@ class OutlandTierIn(BaseModel):
 
 
 class EquipIn(BaseModel):
-    kind: Literal["ball", "potion"]
+    kind: Literal["ball", "potion", "revive"]
     id: int
 
 
@@ -60,7 +60,7 @@ class BulkPauseIn(BaseModel):
 
 
 class BulkEquipIn(BaseModel):
-    kind: Literal["ball", "potion"]
+    kind: Literal["ball", "potion", "revive"]
     id: int
 
 
@@ -91,6 +91,7 @@ class AutomationPatchIn(BaseModel):
     huntSlug: str | None = None
     autoBestHunt: bool | None = None
     autoBestHuntRegion: str | None = None
+    autoBestHuntPriority: str | None = None
     autoPassClaim: bool | None = None
     gameAutoPotion: bool | None = None
     gameAutoRevive: bool | None = None
@@ -376,17 +377,26 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
         if not conn.can_send:
             return JSONResponse({"error": "A conta está offline."}, status_code=409)
         is_ball = body.kind == "ball"
-        if (is_ball and body.id not in BALL_NAMES) or (not is_ball and body.id not in KNOWN_POTION_IDS):
+        is_revive = body.kind == "revive"
+        valid = set(BALL_NAMES) if is_ball else (KNOWN_REVIVE_IDS if is_revive else KNOWN_POTION_IDS)
+        if body.id not in valid:
             return JSONResponse({"error": "Item inválido."}, status_code=400)
-        await conn.set_automation({"ballIds": [body.id]} if is_ball else {"potionIds": [body.id]})
+        auto_field = "ballIds" if is_ball else ("reviveIds" if is_revive else "potionIds")
+        await conn.set_automation({auto_field: [body.id]})
         # A escolha vira o alvo da reposição automática (e sobrevive a reinícios).
-        field = "ball_id" if is_ball else "potion_id"
+        field = "ball_id" if is_ball else ("revive_id" if is_revive else "potion_id")
         store.update_account(acc_id, {"options": {field: body.id}})
         conn.acc = replace(conn.acc, **{field: body.id})
         bucket = "balls" if is_ball else "items"
         stock = int((conn.estado.get(bucket) or {}).get(str(body.id), 0) or 0)
-        threshold = conn.acc.ball_restock_threshold if is_ball else conn.acc.potion_restock_threshold
-        enabled = conn.acc.auto_ball_restock if is_ball else conn.acc.auto_potion
+        threshold = (
+            conn.acc.ball_restock_threshold if is_ball
+            else (conn.acc.revive_restock_threshold if is_revive else conn.acc.potion_restock_threshold)
+        )
+        enabled = (
+            conn.acc.auto_ball_restock if is_ball
+            else (conn.acc.auto_revive_restock if is_revive else conn.acc.auto_potion)
+        )
         buyable = (body.id in BUYABLE_BALL_IDS) if is_ball else True
         will_buy = enabled and buyable and stock < threshold
         if will_buy:
@@ -683,6 +693,11 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
             reg = (body.autoBestHuntRegion or "all").strip().lower() or "all"
             opts["auto_best_hunt_region"] = acc_changes["auto_best_hunt_region"] = reg
             conn._last_auto_hunt_at = 0.0
+        if "autoBestHuntPriority" in sent and body.autoBestHuntPriority is not None:
+            raw_p = (body.autoBestHuntPriority or "xp").strip()
+            prio = raw_p if raw_p in {"xp", "xpTreinador", "ouro", "shiny", "fragmento"} else "xp"
+            opts["auto_best_hunt_priority"] = acc_changes["auto_best_hunt_priority"] = prio
+            conn._last_auto_hunt_at = 0.0
         if "autoPassClaim" in sent and body.autoPassClaim is not None:
             opts["auto_pass_claim"] = acc_changes["auto_pass_claim"] = bool(body.autoPassClaim)
             if body.autoPassClaim:
@@ -783,15 +798,16 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
 
     @app.post("/api/bulk/equip")
     async def bulk_equip(body: BulkEquipIn, request: Request, tok: str | None = Query(None, alias="token")):
-        """Equipa a mesma Poção ou Bola em todas as contas online."""
+        """Equipa a mesma Poção, Bola ou Revive em todas as contas online."""
         if (r := guard(request, tok)):
             return r
         is_ball = body.kind == "ball"
-        valid = set(BALL_NAMES) if is_ball else KNOWN_POTION_IDS
+        is_revive = body.kind == "revive"
+        valid = set(BALL_NAMES) if is_ball else (KNOWN_REVIVE_IDS if is_revive else KNOWN_POTION_IDS)
         if body.id not in valid:
             return JSONResponse({"error": "item desconhecido"}, status_code=400)
-        field = "ballIds" if is_ball else "potionIds"
-        opt = "ball_id" if is_ball else "potion_id"
+        field = "ballIds" if is_ball else ("reviveIds" if is_revive else "potionIds")
+        opt = "ball_id" if is_ball else ("revive_id" if is_revive else "potion_id")
         updated: list[str] = []
         skipped: list[str] = []
         for c in manager.connections():
