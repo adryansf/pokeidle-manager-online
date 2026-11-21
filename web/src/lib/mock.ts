@@ -427,6 +427,72 @@ function installMockApi(accs: AccountSnapshot[]) {
       a.equipped![kind] = { ...opt };
       return json({ ok: true, stock: opt.qty, willBuy: opt.qty < 100, restockEnabled: true, buyable: id !== 5 });
     }
+    m = path.match(/^\/api\/accounts\/(\d+)\/pause$/);
+    if (m && init?.method === "POST") {
+      await wait();
+      const a = accs[Number(m[1]) - 1];
+      const body = init.body ? (JSON.parse(String(init.body)) as { paused?: boolean }) : {};
+      const next = body.paused === undefined ? !a.paused : Boolean(body.paused);
+      a.paused = next;
+      a.status = next ? "paused_cooldown" : "online";
+      a.state = next ? "PAUSED_MANUAL" : "ONLINE";
+      a.lastReason = next ? "Pausada manualmente" : "";
+      return json({ ok: true, paused: next, state: a.state });
+    }
+    m = path.match(/^\/api\/accounts\/(\d+)\/live$/);
+    if (m) {
+      const idx = Number(m[1]) - 1;
+      const a = accs[idx] ?? accs[0];
+      const now = Date.now();
+      return json({
+        account: a.id,
+        numericId: idx + 1,
+        nick: a.nick,
+        state: a.state ?? (a.status === "online" ? "ONLINE" : "PAUSED_MANUAL"),
+        paused: Boolean(a.paused),
+        lastReason: a.lastReason ?? "",
+        combatLockMs: 0,
+        hunt: a.hunt
+          ? {
+              slug: a.hunt.slug ?? "bellsprout",
+              name: a.huntName ?? "Bellsprout",
+              level: 150,
+              kills: a.hunt.kills,
+              minutes: Math.round(a.hunt.minutes * 10) / 10,
+              species: [{ pokeId: 69, name: "Bellsprout", points: 15, looktype: 60069 }],
+            }
+          : null,
+        pokemon: a.pokemon,
+        slots: a.paused
+          ? []
+          : [
+              {
+                slot: 1,
+                name: a.huntName ?? "Bellsprout",
+                pokeId: 69,
+                looktype: 60069,
+                level: 148,
+                shiny: false,
+                hp: 420,
+                maxHp: 1200,
+                state: "fighting",
+                lastMove: "Flamethrower",
+                lastDamage: 780,
+                ballId: null,
+                ballName: null,
+                chance: null,
+                xp: null,
+                gold: null,
+                drops: [],
+                ageMs: 350,
+              },
+            ],
+        events: [
+          { id: 2, ts: now - 500, kind: "attack", slot: 1, name: a.huntName ?? "Bellsprout", move: "Flamethrower", damage: 780, hp: 420 },
+          { id: 1, ts: now - 3200, kind: "kill", slot: 2, name: a.huntName ?? "Bellsprout", level: 148, xp: 12400, gold: 850, drops: [{ name: "Leaf Stone", qty: 1 }] },
+        ],
+      });
+    }
     m = path.match(/^\/api\/accounts\/(\d+)\/hunt\/queue$/);
     if (m && init?.method === "DELETE") {
       accs[Number(m[1]) - 1].huntPending = null;

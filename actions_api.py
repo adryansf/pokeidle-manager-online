@@ -42,6 +42,10 @@ class EquipIn(BaseModel):
     id: int
 
 
+class PauseIn(BaseModel):
+    paused: bool | None = None
+
+
 def hunt_catalog(conn: AccountConnection) -> list[dict]:
     """`welcome.hunts` da conta, só com os campos que o mapa usa."""
     out = []
@@ -321,3 +325,118 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
         if will_buy:
             await conn.restock_now("ball" if is_ball else "item")
         return {"ok": True, "stock": stock, "willBuy": will_buy, "restockEnabled": enabled, "buyable": buyable}
+
+    @app.post("/api/accounts/{acc_id}/pause")
+    async def toggle_pause(acc_id: int, request: Request, body: PauseIn | None = None,
+                           tok: str | None = Query(None, alias="token")):
+        """Pausa ou retoma manualmente uma conta sem removê-la do Dashboard."""
+        if (r := guard(request, tok)):
+            return r
+        conn = conn_of(acc_id)
+        if conn is None:
+            return JSONResponse({"error": "conta não encontrada ou desligada"}, status_code=404)
+        target = (not conn.manual_paused) if (body is None or body.paused is None) else bool(body.paused)
+        await conn.set_manual_pause(target)
+        return {"ok": True, "paused": conn.manual_paused, "state": conn.state.value}
+
+    @app.get("/api/accounts/{acc_id}/live")
+    async def account_live(acc_id: int, request: Request, tok: str | None = Query(None, alias="token")):
+        """Visão Ao Vivo (Modo Live) da conta em tempo real: Pokémon ativo, slots do campo de batalha e feed."""
+        if (r := auth.read_guard(request, tok)):
+            return r
+        conn = conn_of(acc_id)
+        if conn is None:
+            return JSONResponse({"error": "conta não encontrada ou desligada"}, status_code=404)
+        from game_data import POKEMON_NAMES
+        from sprite_outfit import look_of
+
+        conn.hunt._prune_live_slots()
+        s = conn.hunt.session
+        slug = s.slug if s else conn.estado.get("huntSlug")
+        hunt_obj = next((h for h in conn.hunts if isinstance(h, dict) and h.get("slug") == slug), None)
+        # Mapa de nome -> pokeId para enriquecer os slots selvagens com o sprite da espécie
+        name_to_pid: dict[str, int] = {}
+        for pid, pname in POKEMON_NAMES.items():
+            if pname:
+                name_to_pid.setdefault(str(pname).lower(), int(pid))
+        for h in conn.hunts:
+            if isinstance(h, dict):
+                for e in h.get("especies") or []:
+                    if isinstance(e, dict) and e.get("nome") and e.get("pokeId"):
+                        name_to_pid[str(e["nome"]).lower()] = int(e["pokeId"])
+        cat = _catalog.get("full") or {}
+
+        def _look_for(pid: int | None, raw_look: int | None = None) -> int | None:
+            if raw_look and raw_look > 1:
+                return raw_look
+            if pid and pid in cat and (cat[pid].get("looktype") or 0) > 1:
+                return cat[pid]["looktype"]
+            if pid and 1 <= pid <= 1025:
+                return 60000 + pid
+            return raw_look
+
+        now_mono = time.monotonic()
+        slots = []
+        for slot_id in sorted(conn.hunt.live_slots):
+            raw_s = conn.hunt.live_slots[slot_id]
+            sname = str(raw_s.get("name") or "").strip()
+            pid = raw_s.get("pokeId") or (name_to_pid.get(sname.lower()) if sname else None)
+            slots.append({
+                "slot": slot_id,
+                "name": sname or (POKEMON_NAMES.get(int(pid)) if pid else f"Selvagem #{slot_id}"),
+                "pokeId": pid,
+                "looktype": _look_for(pid, raw_s.get("looktype")),
+                "level": raw_s.get("level"),
+                "shiny": bool(raw_s.get("shiny")),
+                "hp": raw_s.get("hp"),
+                "maxHp": raw_s.get("maxHp"),
+                "state": raw_s.get("state", "fighting"),
+                "lastMove": raw_s.get("lastMove"),
+                "lastDamage": raw_s.get("lastDamage"),
+                "ballId": raw_s.get("ballId"),
+                "ballName": BALL_NAMES.get(int(raw_s["ballId"])) if raw_s.get("ballId") else None,
+                "chance": raw_s.get("chance"),
+                "xp": raw_s.get("xp"),
+                "gold": raw_s.get("gold"),
+                "drops": raw_s.get("drops") or [],
+                "ageMs": max(0, int((now_mono - raw_s.get("_t", now_mono)) * 1000)),
+            })
+        hunt_species = []
+        if isinstance(hunt_obj, dict):
+            for e in hunt_obj.get("especies") or []:
+                if isinstance(e, dict) and e.get("pokeId"):
+                    epid = int(e["pokeId"])
+                    hunt_species.append({
+                        "pokeId": epid,
+                        "name": e.get("nome") or POKEMON_NAMES.get(epid) or f"#{epid}",
+                        "points": e.get("pontos", 0),
+                        "looktype": _look_for(epid),
+                    })
+        pk = conn.hunt.active_pokemon()
+        return {
+            "account": f"acc{conn.acc.index}",
+            "numericId": conn.acc.index,
+            "nick": conn.acc.nick,
+            "state": conn.state.value,
+            "paused": conn.manual_paused or conn.state == State.PAUSED_MANUAL,
+            "lastReason": conn.last_reason,
+            "combatLockMs": conn.combat_lock_ms(),
+            "hunt": {
+                "slug": slug,
+                "name": (s.nome if s and s.nome else (hunt_obj or {}).get("nome")) or slug,
+                "level": (hunt_obj or {}).get("nivel") or 0,
+                "kills": s.kills if s else 0,
+                "minutes": round(s.elapsed_h * 60, 1) if s else 0,
+                "species": hunt_species,
+            } if slug else None,
+            "pokemon": {
+                "name": pk.get("nome", "?"),
+                "hp": pk.get("hp", 0),
+                "maxHp": pk.get("maxHp", 0),
+                "level": pk.get("level"),
+                "looktype": look_of(pk),
+                "shiny": bool(pk.get("shiny")),
+            } if pk else None,
+            "slots": slots,
+            "events": list(conn.hunt.live_events),
+        }

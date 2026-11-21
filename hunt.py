@@ -23,9 +23,12 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 log = logging.getLogger("hunt")
+LIVE_EVENTS_MAX = 40
+LIVE_SLOT_TTL_S = 35.0
 
 
 @dataclass
@@ -72,6 +75,9 @@ class HuntManager:
         self.hunts_catalog = hunts_catalog
         self.session: HuntSession | None = None
         self._wild_hp: dict[int, int] = {}  # slot -> hpAlvo mais recente do selvagem
+        self.live_slots: dict[int, dict] = {}  # slot -> estado em tempo real para o Modo Live
+        self.live_events: deque[dict] = deque(maxlen=LIVE_EVENTS_MAX)
+        self.live_seq: int = 0
         self._ws = None  # setado por bind() a cada nova sessão de WebSocket
         self.on_kill = None  # callback(xp, gold) opcional, chamado a cada kill
 
@@ -161,20 +167,81 @@ class HuntManager:
             log.info("[%s] pkFora: %d pokémon removidos da lista local (%d ids recebidos)",
                       self.account_name, removed, len(out_ids))
 
+    def _push_live_event(self, kind: str, **data) -> None:
+        self.live_seq += 1
+        self.live_events.appendleft({"id": self.live_seq, "ts": int(time.time() * 1000), "kind": kind, **data})
+
+    def _prune_live_slots(self) -> None:
+        now = time.monotonic()
+        for k in [s for s, v in self.live_slots.items() if now - v.get("_t", 0) > LIVE_SLOT_TTL_S]:
+            self.live_slots.pop(k, None)
+
     def _handle_battle_event(self, ev: dict) -> None:
+        self._prune_live_slots()
+        now = time.monotonic()
         k = ev.get("k")
         if k == "hunt":
             # Única confirmação que reinicia a duração/sessão (spec).
             self.session = HuntSession(slug=ev.get("slug"), nome=ev.get("nome"))
             self._wild_hp.clear()
+            self.live_slots.clear()
+            self._push_live_event("hunt", slug=ev.get("slug"), name=ev.get("nome") or ev.get("slug"))
             log.info("[%s] Hunt confirmada: %s (%s)", self.account_name,
                      ev.get("nome"), ev.get("slug"))
         elif k == "ataque":
             slot, hp_alvo = ev.get("slot"), ev.get("hpAlvo")
             if slot is not None and hp_alvo is not None:
                 self._wild_hp[slot] = hp_alvo
+            if slot is not None:
+                s = self.live_slots.setdefault(slot, {"slot": slot, "state": "fighting", "_t": now})
+                if s.get("state") in ("caught", "escaped", "corpse") and (hp_alvo or 0) > 0:
+                    s.clear()
+                    s.update({"slot": slot, "state": "fighting"})
+                s["_t"] = now
+                s["state"] = "fighting"
+                for src_k, dst_k in (("alvo", "name"), ("nome", "name"), ("pokeId", "pokeId"),
+                                     ("speciesId", "pokeId"), ("looktype", "looktype"), ("level", "level")):
+                    if ev.get(src_k) is not None:
+                        s[dst_k] = ev.get(src_k)
+                if ev.get("shiny") is not None:
+                    s["shiny"] = bool(ev.get("shiny"))
+                if hp_alvo is not None:
+                    s["hp"] = hp_alvo
+                    s["maxHp"] = max(int(ev.get("hpMaxAlvo") or 0), int(s.get("maxHp") or 0), int(hp_alvo))
+                move = ev.get("golpe") or ev.get("ataque")
+                dmg = ev.get("dano")
+                if move:
+                    s["lastMove"] = move
+                if dmg is not None:
+                    s["lastDamage"] = dmg
+                self._push_live_event("attack", slot=slot, name=s.get("name"), move=move, damage=dmg, hp=hp_alvo)
         elif k == "morte" and ev.get("quem") == "selvagem":
             self._on_wild_death(ev)
+        elif k == "bola":
+            slot = ev.get("slot")
+            caught = bool(ev.get("sucesso"))
+            shiny = bool(ev.get("shiny"))
+            chance = round((ev.get("chance") or 0) * 100, 1)
+            ball_id = ev.get("ballId")
+            s = self.live_slots.get(slot) if slot is not None else None
+            if s is not None:
+                s["_t"] = now
+                s["state"] = "caught" if caught else "escaped"
+                s["shiny"] = bool(s.get("shiny") or shiny)
+                s["ballId"] = ball_id
+                s["chance"] = chance
+                if ev.get("nome"):
+                    s["name"] = ev.get("nome")
+            self._push_live_event("ball", slot=slot, name=ev.get("nome") or (s or {}).get("name"),
+                                  ballId=ball_id, caught=caught, shiny=shiny, chance=chance)
+        elif k == "fugiu":
+            slot = ev.get("slot")
+            if slot is not None and slot in self.live_slots:
+                self.live_slots[slot]["state"] = "escaped"
+                self.live_slots[slot]["_t"] = now
+            self._push_live_event("flee", slot=slot, name=ev.get("nome"), level=ev.get("level"), shiny=bool(ev.get("shiny")))
+        elif k == "compra":
+            self._push_live_event("buy", name=ev.get("nome"), qty=ev.get("qtd"), cost=ev.get("gasto"))
         elif k == "outlandTier":
             log.info("[%s] Outland trocado: %s", self.account_name, ev.get("nome"))
         elif k == "centro":
@@ -186,14 +253,36 @@ class HuntManager:
             self.session = HuntSession(slug=self.estado.get("huntSlug"))
         s = self.session
         s.kills += 1
-        s.xp_ganho += ev.get("xpTreinador", ev.get("xp", 0)) or 0
-        s.gold_ganho += (ev.get("ouro", 0) or 0) + (ev.get("ouroVendaAuto", 0) or 0)
+        xp = ev.get("xpTreinador", ev.get("xp", 0)) or 0
+        gold = (ev.get("ouro", 0) or 0) + (ev.get("ouroVendaAuto", 0) or 0)
+        s.xp_ganho += xp
+        s.gold_ganho += gold
         if self.on_kill:
-            self.on_kill(ev.get("xpTreinador", ev.get("xp", 0)) or 0,
-                         (ev.get("ouro", 0) or 0) + (ev.get("ouroVendaAuto", 0) or 0))
+            self.on_kill(xp, gold)
         slot = ev.get("slot")
+        drops = [{"name": d.get("nome"), "qty": d.get("qtd", 1)} for d in (ev.get("drops") or [])
+                 if isinstance(d, dict) and d.get("nome")]
+        shiny = bool(ev.get("shiny"))
         if slot is not None:
             self._wild_hp.pop(slot, None)
+            ls = self.live_slots.setdefault(slot, {"slot": slot})
+            ls["_t"] = time.monotonic()
+            ls["state"] = "corpse"
+            ls["hp"] = 0
+            if ev.get("nome"):
+                ls["name"] = ev.get("nome")
+            if ev.get("pokeId") or ev.get("speciesId"):
+                ls["pokeId"] = ev.get("pokeId") or ev.get("speciesId")
+            if ev.get("looktype"):
+                ls["looktype"] = ev.get("looktype")
+            if ev.get("level") is not None:
+                ls["level"] = ev.get("level")
+            ls["shiny"] = bool(ls.get("shiny") or shiny)
+            ls["xp"] = xp
+            ls["gold"] = gold
+            ls["drops"] = drops
+        self._push_live_event("kill", slot=slot, name=ev.get("nome"), level=ev.get("level"),
+                              shiny=shiny, xp=xp, gold=gold, drops=drops)
         log.info("[%s] %s morreu (slot=%s) xp=%s gold=%s drops=%s",
                  self.account_name, ev.get("nome"), slot,
                  ev.get("xpTreinador", ev.get("xp")), ev.get("ouro"),

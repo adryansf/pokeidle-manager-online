@@ -1,11 +1,13 @@
 import { AnimatePresence, motion, useDragControls, type PanInfo } from "framer-motion";
-import { ChevronDown, Clock, Crosshair, Crown, MapPin, Star, Swords } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { ChevronDown, Clock, Crosshair, Crown, MapPin, Pause, Play, Radio, Star, Swords } from "lucide-react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ItemSprite, PokemonSprite, ShinyMark } from "@/components/Sprites";
 import { EquipPopover } from "@/components/EquipPopover";
+import { LiveModal } from "@/components/LiveModal";
 import { StatusPill } from "@/components/StatusPill";
 import { XpMedallion, XpRace, XpSpark, XpVersus } from "@/components/XpMeters";
 import { AnimatedNumber, Coin, GoldPerHourIcon } from "@/components/ui";
+import { actions } from "@/lib/actions";
 import { serverNow, useAccount } from "@/lib/telemetry";
 import type { EquippedItem } from "@/lib/types";
 import { type CardStyle, useCardStyle } from "@/lib/cardStyle";
@@ -400,6 +402,9 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
   const cardStyle = useCardStyle();
   const controls = useDragControls();
   const [lifted, setLifted] = useState(false);
+  const [liveOpen, setLiveOpen] = useState(false);
+  const [pauseBusy, setPauseBusy] = useState(false);
+  const closeLive = useCallback(() => setLiveOpen(false), []);
   const liftedRef = useRef(false);
   const hold = useRef<{ timer: number; x: number; y: number } | null>(null);
   const ptr = useRef({ x: 0, y: 0 }); // posição do dedo na tela durante o arrasto
@@ -418,7 +423,7 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
     }
   };
   const onPointerDown = (e: React.PointerEvent<HTMLElement>) => {
-    if (!touchMode || e.pointerType !== "touch" || (e.target as HTMLElement).closest("a,input,select,textarea")) return;
+    if (!touchMode || e.pointerType !== "touch" || (e.target as HTMLElement).closest("a,button,input,select,textarea")) return;
     const native = e.nativeEvent;
     clearHold();
     hold.current = {
@@ -539,7 +544,44 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
                 <b className="truncate font-semibold text-fg">{acc.huntName ?? prettySlug(acc.hunt?.slug)}</b>
               </span>
             </div>
-            <StatusPill status={acc.status} />
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                title="Abrir visão Ao Vivo (Modo Live)"
+                aria-label={`Abrir visão ao vivo de ${acc.nick}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!justDragged()) setLiveOpen(true);
+                }}
+                className="inline-flex h-7 items-center gap-1 rounded-lg border border-line bg-tile px-2 text-[11px] font-bold text-fg transition-colors hover:border-edge hover:text-poke-gold active:scale-95"
+              >
+                <Radio className={`size-3.5 ${acc.status === "online" ? "text-poke-red" : "text-mute"}`} aria-hidden />
+                <span className="hidden sm:inline">Live</span>
+              </button>
+              <button
+                type="button"
+                disabled={pauseBusy}
+                title={acc.paused ? "Retomar conta (voltar a conectar)" : "Pausar conta manualmente"}
+                aria-label={acc.paused ? `Retomar ${acc.nick}` : `Pausar ${acc.nick}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (justDragged() || pauseBusy) return;
+                  setPauseBusy(true);
+                  void actions.pause(id, !acc.paused).finally(() => setPauseBusy(false));
+                }}
+                className={`inline-flex h-7 items-center gap-1 rounded-lg border px-2 text-[11px] font-bold transition-colors active:scale-95 disabled:opacity-50 ${
+                  acc.paused
+                    ? "border-[#2f6b3a] bg-[#16301c] text-poke-green hover:bg-[#1e4226]"
+                    : "border-line bg-tile text-mute hover:border-edge hover:text-poke-gold"
+                }`}
+              >
+                {acc.paused ? <Play className="size-3.5" aria-hidden /> : <Pause className="size-3.5" aria-hidden />}
+                <span className="hidden sm:inline">{acc.paused ? "Retomar" : "Pausar"}</span>
+              </button>
+              <StatusPill status={acc.status} />
+            </div>
           </div>
           {/* Nos modelos com barras de XP os níveis já aparecem no bloco; no Padrão e na aba Sessão ficam aqui. */}
           <div className={`mt-0.5 items-center gap-x-2 text-xs text-mute sm:mt-1 sm:text-sm ${mode === "sessao" || cardStyle === "padrao" ? "flex" : "hidden"}`}>
@@ -567,6 +609,26 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
           </div>
         </div>
       </header>
+
+      {acc.paused && (
+        <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-[#7a5a1c] bg-[#33260e]/70 px-2.5 py-1.5 text-xs text-poke-gold">
+          <span className="truncate">Conta pausada manualmente — desconectada do jogo.</span>
+          <button
+            type="button"
+            disabled={pauseBusy}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (pauseBusy) return;
+              setPauseBusy(true);
+              void actions.pause(id, false).finally(() => setPauseBusy(false));
+            }}
+            className="shrink-0 rounded border border-[#2f6b3a] bg-[#16301c] px-2 py-0.5 text-[11px] font-bold text-poke-green hover:bg-[#1e4226] disabled:opacity-50"
+          >
+            Retomar
+          </button>
+        </div>
+      )}
 
       {acc.huntPending && (
         <p className="mt-1.5 truncate text-xs text-poke-gold sm:hidden">→ {acc.huntPending.name} (na fila)</p>
@@ -600,6 +662,7 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
           </span>
         )}
       </footer>
+      <LiveModal accId={id} open={liveOpen} onClose={closeLive} />
     </motion.article>
   );
 }

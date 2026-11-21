@@ -48,6 +48,7 @@ class State(enum.Enum):
     AUTHENTICATING = "AUTHENTICATING"
     ONLINE = "ONLINE"
     PAUSED_COOLDOWN = "PAUSED_COOLDOWN"
+    PAUSED_MANUAL = "PAUSED_MANUAL"  # pausada manualmente pelo usuário no painel
     BLOCKED = "BLOCKED"   # precisa de ação do usuário (token inválido, ban...): não reconecta sozinho
 
 
@@ -187,6 +188,9 @@ class AccountConnection:
         self._down_timer = None            # alerta de queda agendado (cancelado se a conta voltar logo)
         self._down_reason = ""
         self.state = State.DISCONNECTED
+        self.manual_paused = False        # pausa manual acionada pelo usuário no painel
+        self._active_ws = None            # socket ativo para fechar imediatamente ao pausar
+        self._wake_event: asyncio.Event | None = None
         self.block: dict | None = None    # {kind, detail} quando BLOCKED
         self.last_reason = ""             # último motivo de queda/pausa, para o painel
         self.on_auth_status = None        # callback(acc_id, status, detail): painel/banco
@@ -261,6 +265,9 @@ class AccountConnection:
     def _alert_state(self, state: State, reason: str) -> None:
         """Avisa no Discord a queda (1x por queda) e a volta, com o tempo fora.
         Título = nick da conta (sem o prefixo ACCn: usado só nos logs)."""
+        if state == State.PAUSED_MANUAL:
+            self._cancel_down_timer()
+            return
         if state == State.ONLINE:
             self._cancel_down_timer()
             if self._down_alerted and self._down_since is not None:
@@ -366,6 +373,7 @@ class AccountConnection:
                 max_size=None,             # 'welcome' é um snapshot grande
                 open_timeout=20,
             ) as ws:
+                self._active_ws = ws
                 self._set(State.AUTHENTICATING, "hello enviado")
                 await ws.send(self._hello())
                 welcome = await self._wait_welcome(ws)
@@ -426,6 +434,7 @@ class AccountConnection:
                 try:
                     await recv_task
                 finally:
+                    self._active_ws = None
                     self.market.unbind()
                     self.pvp.unbind()
                     for t in background:
@@ -719,13 +728,56 @@ class AccountConnection:
                 r._last_try.clear()
                 await r.check_and_restock()
 
+    async def set_manual_pause(self, paused: bool) -> None:
+        """Pausa ou retoma manualmente a conta mantendo o card visível no Dashboard."""
+        self.manual_paused = bool(paused)
+        if self.manual_paused:
+            self._cancel_down_timer()
+            self.last_reason = "Pausada manualmente pelo painel."
+            ws = self._active_ws
+            if ws is not None:
+                try:
+                    await ws.close(code=1000, reason="pausa manual")
+                except Exception:  # noqa: BLE001
+                    pass
+            self._set(State.PAUSED_MANUAL, "pausa manual pelo painel", "")
+            if self._wake_event is not None:
+                self._wake_event.set()
+        else:
+            self.last_reason = ""
+            if self.state == State.PAUSED_MANUAL:
+                self.state = State.DISCONNECTED
+            if self._wake_event is not None:
+                self._wake_event.set()
+
+    async def _wait_wake(self, timeout: float | None = None) -> None:
+        if self._wake_event is None:
+            self._wake_event = asyncio.Event()
+        self._wake_event.clear()
+        try:
+            if timeout is None:
+                await self._wake_event.wait()
+            else:
+                await asyncio.wait_for(self._wake_event.wait(), timeout)
+        except asyncio.TimeoutError:
+            pass
+
     # ----------------------------------------------------------- supervisor
     async def run_forever(self) -> None:
-        """Mantém a conta conectada; aplica cooldown de 5 min em rejeição."""
+        """Mantém a conta conectada; aplica cooldown de 5 min em rejeição e respeita pausa manual."""
         while True:
+            if self.manual_paused:
+                self.last_reason = "Pausada manualmente pelo painel."
+                if self.state != State.PAUSED_MANUAL:
+                    self._set(State.PAUSED_MANUAL, "aguardando retomada manual", "")
+                while self.manual_paused:
+                    await self._wait_wake()
+                continue
             self._online_since = None
             try:
                 await self._session()
+                if self.manual_paused:
+                    continue
                 motivo = "O jogo parou de responder; reconectando." if self._silent_close else "O jogo encerrou a conexão."
                 self._silent_close = False
                 self._set(State.DISCONNECTED, "sessão encerrada", motivo)
@@ -738,12 +790,16 @@ class AccountConnection:
                 while True:  # só o painel (editar/reiniciar a conta) tira daqui, cancelando a task
                     await asyncio.sleep(3600)
             except NetworkFull:
+                if self.manual_paused:
+                    continue
                 self.last_reason = "A rede atingiu o limite de contas online."
                 self._set(State.DISCONNECTED, f"rede cheia; nova tentativa em {NETWORK_FULL_RETRY_S}s",
                           "A rede atingiu o limite de contas online; nova tentativa em instantes.")
-                await asyncio.sleep(NETWORK_FULL_RETRY_S)
+                await self._wait_wake(NETWORK_FULL_RETRY_S)
                 continue
             except AuthRejected as e:
+                if self.manual_paused:
+                    continue
                 externo = "login externo" in str(e)
                 motivo = ("A conta foi aberta em outro lugar (login externo)." if externo
                           else "O jogo recusou o login da conta.")
@@ -752,15 +808,20 @@ class AccountConnection:
                 self.last_reason = motivo
                 self._set(State.PAUSED_COOLDOWN, f"{e}; aguardando {wait}s",
                           f"{motivo} Nova tentativa em {wait / 60:g} min.")
-                await asyncio.sleep(wait)
+                await self._wait_wake(wait)
                 continue
             except asyncio.CancelledError:
                 raise
             except (ProxyError, OSError, aiohttp.ClientError) as e:
+                if self.manual_paused:
+                    continue
                 self._set(State.DISCONNECTED, f"falha de proxy/rede: {e!r}", friendly_reason(e))
             except Exception as e:  # noqa: BLE001 - supervisor não pode morrer
+                if self.manual_paused:
+                    continue
                 self._set(State.DISCONNECTED, f"erro: {e!r}", friendly_reason(e))
-            await asyncio.sleep(self._reconnect_delay())
+            if not self.manual_paused:
+                await self._wait_wake(self._reconnect_delay())
 
     def _reconnect_delay(self) -> float:
         """Caiu uma sessão que estava funcionando (ex.: o jogo reiniciou o servidor): tenta voltar na hora, uma vez.

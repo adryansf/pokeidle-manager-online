@@ -50,6 +50,9 @@ const sameAccount = (a: AccountSnapshot, b: AccountSnapshot) =>
   a.nick === b.nick &&
   a.level === b.level &&
   a.status === b.status &&
+  a.state === b.state &&
+  a.paused === b.paused &&
+  a.lastReason === b.lastReason &&
   a.xpPerHour === b.xpPerHour &&
   a.goldPerHour === b.goldPerHour &&
   a.gold === b.gold &&

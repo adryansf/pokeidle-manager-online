@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 _STATUS = {
     State.ONLINE: "online",
     State.PAUSED_COOLDOWN: "paused_cooldown",
+    State.PAUSED_MANUAL: "paused_cooldown",
     State.BLOCKED: "blocked",
 }  # o resto (DISCONNECTED/CONNECTING/AUTHENTICATING) -> "offline"
 
@@ -205,6 +206,7 @@ def account_snapshot(c: "AccountConnection") -> dict:
         "level": est.get("level") or 0,
         "status": _STATUS.get(c.state, "offline"),
         "state": c.state.value,  # estado detalhado, p/ debug
+        "paused": bool(getattr(c, "manual_paused", False) or c.state == State.PAUSED_MANUAL),
         "blocked": c.block,      # {kind, detail} quando o jogo recusou a conta
         "lastReason": c.last_reason,
         "pokemon": {

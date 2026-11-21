@@ -60,6 +60,7 @@ export interface AccountSnapshot {
   level: number;
   status: AccountStatus;
   state?: string;
+  paused?: boolean;
   blocked?: { kind: string; detail: string } | null;
   lastReason?: string;
   vip?: boolean;

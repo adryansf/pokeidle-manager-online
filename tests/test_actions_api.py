@@ -34,7 +34,8 @@ def env(store, tmp_path, monkeypatch):
         self._conns[conn.acc.index] = conn
 
     monkeypatch.setattr(AccountManager, "_spawn", fake_spawn)
-    acc_id = mgr.add({"nick": "Ash", "token": TOKEN, "device_id": "dev-12345678"})
+    acc_id = mgr.add({"nick": "Ash", "token": TOKEN, "device_id": "dev-12345678",
+                      "options": {"auto_potion": True, "auto_ball_restock": True}})
     conn = mgr.get(acc_id)
     conn.state = State.ONLINE
     conn.hunt._ws = FakeWS()
@@ -319,3 +320,49 @@ def test_snapshot_reports_map_and_outland_tier(env):
     conn.hunt.session = HuntSession(slug="lapras")
     m = account_snapshot(conn)["map"]
     assert m["region"] == "outland" and m["label"] == "Outland 3" and m["outland"] == {"tier": 3, "label": "Outland 3", "mult": 1.5}
+
+
+def test_manual_pause_and_resume(env):
+    from telemetry import account_snapshot
+
+    c, conn, acc_id, _ = env
+    assert c.post(f"/api/accounts/{acc_id}/pause").status_code == 401
+    r = c.post(f"/api/accounts/{acc_id}/pause", json={"paused": True}, headers=H)
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "paused": True, "state": "PAUSED_MANUAL"}
+    snap = account_snapshot(conn)
+    assert snap["paused"] is True and snap["status"] == "paused_cooldown" and snap["state"] == "PAUSED_MANUAL"
+
+    r2 = c.post(f"/api/accounts/{acc_id}/pause", json={"paused": False}, headers=H)
+    assert r2.status_code == 200
+    assert r2.json()["paused"] is False and conn.manual_paused is False
+
+
+def test_live_endpoint_returns_slots_and_events(env):
+    c, conn, acc_id, _ = env
+    assert c.get(f"/api/accounts/{acc_id}/live").status_code == 401
+    conn.estado.update({
+        "activeId": 5,
+        "pokemons": [{"id": 5, "speciesId": 212, "nome": "Scizor", "level": 100, "hp": 800, "maxHp": 1000, "shiny": False}],
+    })
+    conn.hunt.handle_frame({"t": "batalha", "ev": [
+        {
+            "k": "ataque", "slot": 1, "atacante": "Scizor", "alvo": "Shellder",
+            "golpe": "Bullet Punch", "dano": 450, "hpAlvo": 550, "hpMaxAlvo": 1000, "level": 35,
+        },
+        {
+            "k": "morte", "quem": "selvagem", "slot": 2, "nome": "Shellder", "xp": 1200, "ouro": 150,
+            "drops": [{"nome": "Pearl", "qtd": 1}], "shiny": True,
+        },
+    ]})
+    r = c.get(f"/api/accounts/{acc_id}/live", headers=H)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["nick"] == "Ash" and data["paused"] is False
+    assert data["pokemon"]["name"] == "Scizor" and data["pokemon"]["hp"] == 800
+    assert len(data["slots"]) == 2
+    s1 = next(s for s in data["slots"] if s["slot"] == 1)
+    s2 = next(s for s in data["slots"] if s["slot"] == 2)
+    assert s1["state"] == "fighting" and s1["hp"] == 550 and s1["lastDamage"] == 450
+    assert s2["state"] == "corpse" and s2["shiny"] is True and s2["drops"] == [{"name": "Pearl", "qty": 1}]
+    assert len(data["events"]) >= 2

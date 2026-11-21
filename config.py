@@ -109,11 +109,11 @@ class AccountConfig:
     hunt_slug: str | None = None  # opcional; se definido, seleciona essa hunt ao conectar
     auto_catch: bool = True          # captura automática (ball.throw) em cadáveres válidos
     ball_priority: tuple[int, ...] = tuple(DEFAULT_BALL_PRIORITY)  # ordem de preferência de ballId
-    auto_potion: bool = True         # reposição automática de Potion
+    auto_potion: bool = False        # reposição automática de Potion (desativada por padrão)
     potion_id: int | None = None     # qual Potion repor; None = fallback por heldItemId
     potion_restock_threshold: int = DEFAULT_POTION_RESTOCK_THRESHOLD
     potion_restock_qty: int = DEFAULT_POTION_RESTOCK_QTY
-    auto_ball_restock: bool = True   # reposição automática da Ball equipada
+    auto_ball_restock: bool = False  # reposição automática da Ball equipada (desativada por padrão)
     ball_id: int | None = None       # qual Ball repor; None = automation.ballIds do jogo
     ball_restock_threshold: int = DEFAULT_BALL_RESTOCK_THRESHOLD
     ball_restock_qty: int = DEFAULT_BALL_RESTOCK_QTY
@@ -136,11 +136,11 @@ OPTION_DEFAULTS: dict = {
     "hunt_slug": "",
     "auto_catch": True,
     "ball_priority": list(DEFAULT_BALL_PRIORITY),
-    "auto_potion": True,
+    "auto_potion": False,
     "potion_id": None,
     "potion_restock_threshold": DEFAULT_POTION_RESTOCK_THRESHOLD,
     "potion_restock_qty": DEFAULT_POTION_RESTOCK_QTY,
-    "auto_ball_restock": True,
+    "auto_ball_restock": False,
     "ball_id": None,
     "ball_restock_threshold": DEFAULT_BALL_RESTOCK_THRESHOLD,
     "ball_restock_qty": DEFAULT_BALL_RESTOCK_QTY,
@@ -213,11 +213,11 @@ def _env_account(i: int) -> dict | None:
         "auto_catch": flag("AUTO_CATCH", True),
         "ball_priority": ([int(x) for x in prio_raw.split(",") if x.strip()]
                           if prio_raw else list(DEFAULT_BALL_PRIORITY)),
-        "auto_potion": flag("AUTO_POTION", True),
+        "auto_potion": flag("AUTO_POTION", False),
         "potion_id": num("POTION_ID"),
         "potion_restock_threshold": num("POTION_RESTOCK_THRESHOLD") or DEFAULT_POTION_RESTOCK_THRESHOLD,
         "potion_restock_qty": num("POTION_RESTOCK_QTY") or DEFAULT_POTION_RESTOCK_QTY,
-        "auto_ball_restock": flag("AUTO_BALL_RESTOCK", True),
+        "auto_ball_restock": flag("AUTO_BALL_RESTOCK", False),
         "ball_id": num("BALL_ID"),
         "ball_restock_threshold": num("BALL_RESTOCK_THRESHOLD") or DEFAULT_BALL_RESTOCK_THRESHOLD,
         "ball_restock_qty": num("BALL_RESTOCK_QTY") or DEFAULT_BALL_RESTOCK_QTY,

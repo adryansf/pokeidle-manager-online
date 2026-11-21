@@ -38,6 +38,95 @@ export interface PokemonSheet {
   trainerLevel: number;
 }
 
+export interface PauseResult {
+  ok: boolean;
+  paused: boolean;
+  state: string;
+}
+
+export interface LiveDrop {
+  name: string;
+  qty: number;
+}
+
+export interface LiveSlot {
+  slot: number;
+  name: string;
+  pokeId?: number | null;
+  looktype?: number | null;
+  level?: number | null;
+  shiny: boolean;
+  hp?: number | null;
+  maxHp?: number | null;
+  state: "fighting" | "corpse" | "caught" | "escaped" | string;
+  lastMove?: string | null;
+  lastDamage?: number | null;
+  ballId?: number | null;
+  ballName?: string | null;
+  chance?: number | null;
+  xp?: number | null;
+  gold?: number | null;
+  drops: LiveDrop[];
+  ageMs: number;
+}
+
+export interface LiveEvent {
+  id?: number;
+  ts: number;
+  kind: "attack" | "kill" | "ball" | "flee" | "hunt" | "buy" | string;
+  slot?: number | null;
+  name?: string | null;
+  slug?: string | null;
+  move?: string | null;
+  damage?: number | null;
+  hp?: number | null;
+  level?: number | null;
+  shiny?: boolean;
+  xp?: number | null;
+  gold?: number | null;
+  drops?: LiveDrop[];
+  ballId?: number | null;
+  caught?: boolean;
+  chance?: number | null;
+  qty?: number | null;
+  cost?: number | null;
+}
+
+export interface LiveHuntSpecies {
+  pokeId: number;
+  name: string;
+  points: number;
+  looktype?: number | null;
+}
+
+export interface AccountLive {
+  account: string;
+  numericId: number;
+  nick: string;
+  state: string;
+  paused: boolean;
+  lastReason?: string;
+  combatLockMs: number;
+  hunt: {
+    slug: string;
+    name: string;
+    level: number;
+    kills: number;
+    minutes: number;
+    species: LiveHuntSpecies[];
+  } | null;
+  pokemon: {
+    name: string;
+    hp: number;
+    maxHp: number;
+    level?: number | null;
+    looktype?: number | null;
+    shiny?: boolean;
+  } | null;
+  slots: LiveSlot[];
+  events: LiveEvent[];
+}
+
 export const actions = {
   equip: (accId: string, kind: "ball" | "potion", id: number) =>
     call<EquipResult>("POST", `/api/accounts/${numId(accId)}/equip`, { kind, id }),
@@ -47,6 +136,9 @@ export const actions = {
   sheet: (accId: string) => call<PokemonSheet>("GET", `/api/accounts/${numId(accId)}/sheet`),
   resetSession: () => call<{ ok: boolean; reset: string[] }>("POST", "/api/session/reset"),
   cancelHuntQueue: (accId: string) => call<{ ok: boolean }>("DELETE", `/api/accounts/${numId(accId)}/hunt/queue`),
+  pause: (accId: string, paused?: boolean) =>
+    call<PauseResult>("POST", `/api/accounts/${numId(accId)}/pause`, paused === undefined ? {} : { paused }),
+  live: (accId: string) => call<AccountLive>("GET", `/api/accounts/${numId(accId)}/live`),
 };
 
 export interface HuntSpecies {

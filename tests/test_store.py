@@ -87,6 +87,7 @@ def test_build_account_config_defaults_and_validation():
     acc = config.build_account_config({"id": 3, "nick": "N", "token": "t", "device_id": "d",
                                        "proxy": {"scheme": "http", "host": "h", "port": "8080"}})
     assert acc.index == 3 and acc.proxy.url == "http://h:8080" and acc.auto_catch is True
+    assert acc.auto_potion is False and acc.auto_ball_restock is False
     assert acc.ball_priority == (1, 2, 3, 4)
     with pytest.raises(ValueError):
         config.build_account_config({"id": 1, "nick": "N", "token": "t", "device_id": "d",
