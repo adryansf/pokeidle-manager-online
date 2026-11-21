@@ -61,6 +61,8 @@ class OptionsIn(BaseModel):
     auto_potion_fallback: bool | None = None
     auto_center: bool | None = None
     auto_center_hp_pct: int | None = Field(None, ge=5, le=80)
+    auto_best_hunt: bool | None = None
+    auto_best_hunt_region: str | None = Field(None, max_length=32)
     pvp_auto: bool | None = None
 
 
@@ -823,3 +825,35 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
             return JSONResponse({"error": "Nenhum gateway de notificação (Discord ou Telegram) ativo."}, status_code=400)
         manager.notifier.send("Teste do painel", "Notificações configuradas com sucesso. ✅", BLUE)
         return {"ok": True, "gateway": "all"}
+
+    # ---------------------------------------------------------- Central de Notificações do site
+    @app.get("/api/notifications")
+    async def list_notifications(
+        request: Request,
+        tok: str | None = Query(None, alias="token"),
+        limit: int = 80,
+    ):
+        if (r := auth.read_guard(request, tok)):
+            return r
+        return store.list_notifications(limit=limit)
+
+    @app.post("/api/notifications/read")
+    async def read_notifications(request: Request, tok: str | None = Query(None, alias="token")):
+        if (r := guard(request, tok)):
+            return r
+        notif_id = None
+        try:
+            body = await request.json()
+            if isinstance(body, dict) and body.get("id") is not None:
+                notif_id = int(body["id"])
+        except Exception:  # noqa: BLE001
+            pass
+        store.mark_notifications_read(notif_id)
+        return {"ok": True}
+
+    @app.delete("/api/notifications")
+    async def clear_notifications(request: Request, tok: str | None = Query(None, alias="token")):
+        if (r := guard(request, tok)):
+            return r
+        store.clear_notifications()
+        return {"ok": True}

@@ -19,7 +19,7 @@ import { CapturesView } from "@/components/CapturesView";
 import { ItemSprite, PokemonSprite, ShinyMark } from "@/components/Sprites";
 import { StatusPill } from "@/components/StatusPill";
 import { AnimatedNumber, Coin } from "@/components/ui";
-import { actions, type AutomationPatch } from "@/lib/actions";
+import { actions, useHuntCatalog, type AutomationPatch } from "@/lib/actions";
 import { usePokemons } from "@/lib/api";
 import { accountNumber, useSheet } from "@/lib/sheet";
 import { serverNow, useAccount } from "@/lib/telemetry";
@@ -195,6 +195,7 @@ export function AccountDetailModal({
   onOpenLive: () => void;
 }) {
   const acc = useAccount(accId);
+  const { data: huntCatalog } = useHuntCatalog(open ? accId : null);
   const openSheet = useSheet();
   const [tab, setTab] = useState<DetailTab>("geral");
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -207,6 +208,8 @@ export function AccountDetailModal({
     ballQty: string;
     goldReserve: string;
     autoCenterHpPct: string;
+    huntSlug: string;
+    autoBestHuntRegion: string;
   }>({
     hpLimiarPct: "40",
     potionThreshold: "10",
@@ -215,6 +218,8 @@ export function AccountDetailModal({
     ballQty: "100",
     goldReserve: "0",
     autoCenterHpPct: "20",
+    huntSlug: "",
+    autoBestHuntRegion: "all",
   });
 
   useEffect(() => {
@@ -228,6 +233,8 @@ export function AccountDetailModal({
       ballQty: String(a.ballQty ?? 100),
       goldReserve: String(a.goldReserve ?? 0),
       autoCenterHpPct: String(a.autoCenterHpPct ?? 20),
+      huntSlug: a.huntSlug ?? "",
+      autoBestHuntRegion: a.autoBestHuntRegion ?? "all",
     });
     // Sincroniza quando abre o modal ou muda de conta
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -636,6 +643,141 @@ export function AccountDetailModal({
                           disabled={busyKey === "pvpAuto"}
                           onToggle={() => void toggleAuto("pvpAuto", { pvpAuto: !auto.pvpAuto })}
                         />
+                        <ToggleRow
+                          label="Auto-Melhor Hunt (ao subir de nível)"
+                          desc="Troca automaticamente para a melhor hunt liberada conforme o treinador upa."
+                          checked={Boolean(auto.autoBestHunt)}
+                          disabled={busyKey === "autoBestHunt"}
+                          onToggle={() => void toggleAuto("autoBestHunt", { autoBestHunt: !auto.autoBestHunt })}
+                        />
+                      </div>
+
+                      {/* Controle de Hunt Específica & Pausar Farm no Pokécentro */}
+                      <div className="space-y-3 rounded-xl border border-edge/60 bg-void/50 p-3.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h3 className="text-xs font-bold uppercase tracking-wide text-poke-gold">
+                            Hunt Específica & Pausar Farm (Pokécentro)
+                          </h3>
+                          <button
+                            type="button"
+                            disabled={busyKey === "farmPause" || acc.status !== "online"}
+                            onClick={async () => {
+                              setBusyKey("farmPause");
+                              setMsg(null);
+                              try {
+                                const r = await actions.farmPause(accId, !acc.farmPaused);
+                                setMsg({
+                                  tone: "ok",
+                                  text: r.farmPaused
+                                    ? r.queued
+                                      ? "Farm pausado: assim que sair do combate a conta irá ao Pokécentro e ficará parada lá."
+                                      : "Farm pausado: conta enviada ao Pokécentro (continua online sem caçar)."
+                                    : "Farm retomado!",
+                                });
+                              } catch (e) {
+                                setMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao pausar farm" });
+                              } finally {
+                                setBusyKey(null);
+                              }
+                            }}
+                            className={`btn px-3 py-1.5 text-xs font-bold disabled:opacity-50 ${
+                              acc.farmPaused
+                                ? "border-[#2f6b3a] bg-[#16301c] text-poke-green"
+                                : "border-[#7a5a1c] bg-[#33260e] text-poke-gold"
+                            }`}
+                          >
+                            🏥 {acc.farmPaused ? "Retomar farm na hunt" : "Pausar farm (ir ao Pokécentro)"}
+                          </button>
+                        </div>
+
+                        <div className="grid gap-2.5 sm:grid-cols-2">
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-bold text-mute">
+                              Hunt fixa / específica (mantém sempre esta hunt)
+                            </span>
+                            <div className="flex gap-1.5">
+                              <select
+                                className="field flex-1 text-xs sm:text-sm"
+                                value={autoDraft.huntSlug}
+                                onChange={(e) => setAutoDraft({ ...autoDraft, huntSlug: e.target.value })}
+                              >
+                                <option value="">— Nenhuma (troca manual ou Auto-Hunt) —</option>
+                                {(huntCatalog?.hunts ?? []).map((h) => (
+                                  <option key={h.slug} value={h.slug}>
+                                    {h.nome} (Nv. {h.nivel} · {h.regiao || h.area})
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                disabled={busyKey === "huntSlug"}
+                                onClick={async () => {
+                                  setBusyKey("huntSlug");
+                                  setMsg(null);
+                                  try {
+                                    await actions.setAutomation(accId, { huntSlug: autoDraft.huntSlug });
+                                    setMsg({
+                                      tone: "ok",
+                                      text: autoDraft.huntSlug
+                                        ? `Hunt fixa definida: ${autoDraft.huntSlug}.`
+                                        : "Hunt fixa removida.",
+                                    });
+                                  } catch (e) {
+                                    setMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao definir hunt" });
+                                  } finally {
+                                    setBusyKey(null);
+                                  }
+                                }}
+                                className="btn shrink-0 px-2.5 text-xs font-bold"
+                              >
+                                Aplicar
+                              </button>
+                            </div>
+                          </label>
+
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-bold text-mute">
+                              Região do Auto-Melhor Hunt
+                            </span>
+                            <div className="flex gap-1.5">
+                              <select
+                                className="field flex-1 text-xs sm:text-sm"
+                                value={autoDraft.autoBestHuntRegion}
+                                onChange={(e) => setAutoDraft({ ...autoDraft, autoBestHuntRegion: e.target.value })}
+                              >
+                                <option value="all">Todas as regiões</option>
+                                <option value="kanto">Kanto</option>
+                                <option value="outland">Outland</option>
+                                <option value="johto">Johto</option>
+                                <option value="hoenn">Hoenn</option>
+                                <option value="sinnoh">Sinnoh</option>
+                                <option value="unova">Unova</option>
+                              </select>
+                              <button
+                                type="button"
+                                disabled={busyKey === "autoBestHuntRegion"}
+                                onClick={async () => {
+                                  setBusyKey("autoBestHuntRegion");
+                                  setMsg(null);
+                                  try {
+                                    await actions.setAutomation(accId, {
+                                      autoBestHunt: true,
+                                      autoBestHuntRegion: autoDraft.autoBestHuntRegion,
+                                    });
+                                    setMsg({ tone: "ok", text: "Auto-Melhor Hunt atualizado e ativado!" });
+                                  } catch (e) {
+                                    setMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao atualizar região" });
+                                  } finally {
+                                    setBusyKey(null);
+                                  }
+                                }}
+                                className="btn shrink-0 px-2.5 text-xs font-bold"
+                              >
+                                Salvar
+                              </button>
+                            </div>
+                          </label>
+                        </div>
                       </div>
 
                       {/* Ajuste numérico de % de cura e quantidades de recompra */}

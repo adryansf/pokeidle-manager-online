@@ -700,6 +700,28 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
         </div>
       )}
 
+      {acc.farmPaused && !acc.paused && (
+        <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-[#7a5a1c] bg-[#33260e]/70 px-2.5 py-1.5 text-xs text-poke-gold">
+          <span className="truncate">
+            🏥 {acc.farmPausePending ? "Aguardando fim do combate para ir ao Pokécentro…" : "Farm pausado no Pokécentro — conta online sem caçar."}
+          </span>
+          <button
+            type="button"
+            disabled={autoBusy === "farmPause"}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (autoBusy) return;
+              setAutoBusy("farmPause");
+              void actions.farmPause(id, false).finally(() => setAutoBusy(null));
+            }}
+            className="shrink-0 rounded border border-[#2f6b3a] bg-[#16301c] px-2 py-0.5 text-[11px] font-bold text-poke-green hover:bg-[#1e4226] disabled:opacity-50"
+          >
+            Retomar farm
+          </button>
+        </div>
+      )}
+
       {acc.huntPending && (
         <p className="mt-1.5 truncate text-xs text-poke-gold sm:hidden">→ {acc.huntPending.name} (na fila)</p>
       )}
@@ -792,6 +814,7 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
               ],
               ["autoPotionFallback", "Fallback", acc.automation.autoPotionFallback, { autoPotionFallback: !acc.automation.autoPotionFallback }, "Trocar para próxima poção disponível se zerar"],
               ["autoCenter", `Centro ≤${acc.automation.autoCenterHpPct}%`, acc.automation.autoCenter, { autoCenter: !acc.automation.autoCenter }, "Auto-Centro Pokémon de emergência sem poções"],
+              ["autoBestHunt", acc.automation.autoBestHunt ? `Auto-Hunt (${acc.automation.autoBestHuntRegion || "all"})` : "Auto-Hunt", Boolean(acc.automation.autoBestHunt), { autoBestHunt: !acc.automation.autoBestHunt }, "Trocar automaticamente para a melhor hunt liberada ao subir de nível"],
             ] as [string, string, boolean, AutomationPatch, string][]
           ).map(([key, label, on, patch, tip]) => (
             <button
@@ -816,6 +839,27 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
               {label}
             </button>
           ))}
+          {acc.status === "online" && (
+            <button
+              type="button"
+              disabled={autoBusy === "farmPause"}
+              title={acc.farmPaused ? "Retomar o farm na hunt anterior" : "Pausar farm: vai ao Pokécentro e fica parado (conta continua online)"}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (justDragged() || autoBusy) return;
+                setAutoBusy("farmPause");
+                void actions.farmPause(id, !acc.farmPaused).finally(() => setAutoBusy(null));
+              }}
+              className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors active:scale-95 disabled:opacity-50 ${
+                acc.farmPaused
+                  ? "border-[#7a5a1c] bg-[#33260e] text-poke-gold hover:bg-[#463413]"
+                  : "border-line bg-void/60 text-mute/80 hover:border-edge hover:text-poke-gold"
+              }`}
+            >
+              🏥 {acc.farmPaused ? "Retomar farm" : "Pausar farm"}
+            </button>
+          )}
         </div>
       )}
 

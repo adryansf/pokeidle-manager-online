@@ -121,6 +121,8 @@ class AccountConfig:
     auto_potion_fallback: bool = True  # se a poção equipada zerar, troca para a próxima disponível na mochila
     auto_center: bool = True         # emergência: HP baixo sem poções -> vai ao Centro Pokémon
     auto_center_hp_pct: int = 20     # limiar de HP (%) para acionar o Auto-Centro de emergência
+    auto_best_hunt: bool = False     # troca automaticamente para a melhor hunt liberada ao subir de nível
+    auto_best_hunt_region: str = "all"  # filtro de região para auto_best_hunt ("all", "kanto", "outland", ...)
     pvp_auto: bool = False           # entra sozinho na fila do PVP ranqueado
 
     @property
@@ -152,6 +154,8 @@ OPTION_DEFAULTS: dict = {
     "auto_potion_fallback": True,
     "auto_center": True,
     "auto_center_hp_pct": 20,
+    "auto_best_hunt": False,
+    "auto_best_hunt_region": "all",
     "pvp_auto": False,
 }
 
@@ -187,6 +191,8 @@ def build_account_config(d: dict) -> AccountConfig:
         auto_potion_fallback=bool(o.get("auto_potion_fallback", True)),
         auto_center=bool(o.get("auto_center", True)),
         auto_center_hp_pct=min(max(int(o.get("auto_center_hp_pct") or 20), 5), 80),
+        auto_best_hunt=bool(o.get("auto_best_hunt", False)),
+        auto_best_hunt_region=str(o.get("auto_best_hunt_region") or "all").strip().lower() or "all",
         pvp_auto=bool(o["pvp_auto"]),
     )
 

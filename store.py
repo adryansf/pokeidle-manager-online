@@ -144,6 +144,16 @@ CREATE TABLE IF NOT EXISTS captures (
 );
 CREATE INDEX IF NOT EXISTS idx_captures_ts ON captures(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_captures_acc ON captures(account_id, ts DESC);
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    level TEXT NOT NULL DEFAULT 'info',
+    title TEXT NOT NULL,
+    message TEXT NOT NULL DEFAULT '',
+    fields TEXT NOT NULL DEFAULT '[]',
+    read INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_ts ON notifications(ts DESC);
 """
 
 
@@ -464,6 +474,70 @@ class Store:
                 if br["ball_id"] is not None
             ],
         }
+
+    # ----------------------------------------------------------- central de notificações do painel
+    NOTIFICATIONS_MAX = 300
+
+    def add_notification(
+        self,
+        title: str,
+        message: str = "",
+        *,
+        level: str = "info",
+        fields: list[dict] | None = None,
+    ) -> int:
+        with self._lock:
+            cur = self._db.execute(
+                "INSERT INTO notifications (ts, level, title, message, fields, read) VALUES (?,?,?,?,?,0)",
+                (
+                    int(time.time() * 1000),
+                    level if level in ("info", "ok", "warn", "error") else "info",
+                    str(title or "")[:200],
+                    str(message or "")[:1000],
+                    json.dumps(fields or [], ensure_ascii=False),
+                ),
+            )
+            self._db.execute(
+                "DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY id DESC LIMIT ?)",
+                (self.NOTIFICATIONS_MAX,),
+            )
+            self._db.commit()
+            return int(cur.lastrowid)
+
+    def list_notifications(self, limit: int = 80) -> dict:
+        lim = min(max(int(limit), 1), 300)
+        with self._lock:
+            unread = int(self._db.execute("SELECT COUNT(*) FROM notifications WHERE read=0").fetchone()[0] or 0)
+            rows = self._db.execute("SELECT * FROM notifications ORDER BY id DESC LIMIT ?", (lim,)).fetchall()
+        items = []
+        for r in rows:
+            try:
+                f = json.loads(r["fields"] or "[]")
+            except ValueError:
+                f = []
+            items.append({
+                "id": r["id"],
+                "ts": r["ts"],
+                "level": r["level"],
+                "title": r["title"],
+                "message": r["message"],
+                "fields": f,
+                "read": bool(r["read"]),
+            })
+        return {"unreadCount": unread, "items": items}
+
+    def mark_notifications_read(self, notif_id: int | None = None) -> None:
+        with self._lock:
+            if notif_id is not None:
+                self._db.execute("UPDATE notifications SET read=1 WHERE id=?", (int(notif_id),))
+            else:
+                self._db.execute("UPDATE notifications SET read=1 WHERE read=0")
+            self._db.commit()
+
+    def clear_notifications(self) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM notifications")
+            self._db.commit()
 
     # ----------------------------------------------------------- configurações
     def get_setting(self, key: str) -> str:

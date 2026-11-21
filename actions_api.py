@@ -71,6 +71,9 @@ class AutomationPatchIn(BaseModel):
     autoCenter: bool | None = None
     autoCenterHpPct: int | None = None
     goldReserve: int | None = None
+    huntSlug: str | None = None
+    autoBestHunt: bool | None = None
+    autoBestHuntRegion: str | None = None
     gameAutoPotion: bool | None = None
     hpLimiarPct: int | None = None
     pvpAuto: bool | None = None
@@ -484,6 +487,28 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
             "events": list(conn.hunt.live_events),
         }
 
+    @app.post("/api/accounts/{acc_id}/farm-pause")
+    async def toggle_farm_pause(acc_id: int, request: Request, body: PauseIn | None = None,
+                                tok: str | None = Query(None, alias="token")):
+        """Pausa/retoma o farm mantendo a conta ONLINE (envia ao Centro Pokémon e fica parada lá)."""
+        if (r := guard(request, tok)):
+            return r
+        conn = conn_of(acc_id)
+        if conn is None:
+            return JSONResponse({"error": "conta não encontrada ou desligada"}, status_code=404)
+        target = (not conn.farm_paused) if (body is None or body.paused is None) else bool(body.paused)
+        return await conn.set_farm_pause(target)
+
+    @app.post("/api/bulk/farm-pause")
+    async def bulk_farm_pause(body: BulkPauseIn, request: Request, tok: str | None = Query(None, alias="token")):
+        """Pausa/retoma o farm (Centro Pokémon) em todas as contas gerenciadas."""
+        if (r := guard(request, tok)):
+            return r
+        conns = manager.connections()
+        for c in conns:
+            await c.set_farm_pause(body.paused)
+        return {"ok": True, "farmPaused": body.paused, "count": len(conns)}
+
     @app.post("/api/accounts/{acc_id}/center")
     async def go_center(acc_id: int, request: Request, tok: str | None = Query(None, alias="token")):
         """Envia a conta ao Centro Pokémon (centro.ir)."""
@@ -542,6 +567,27 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
         if "goldReserve" in sent and body.goldReserve is not None:
             v = max(0, int(body.goldReserve))
             opts["gold_reserve"] = acc_changes["gold_reserve"] = v
+        if "huntSlug" in sent and body.huntSlug is not None:
+            slug_v = body.huntSlug.strip()
+            opts["hunt_slug"] = slug_v
+            acc_changes["hunt_slug"] = slug_v or None
+            if slug_v:
+                # Ao escolher uma hunt fixa específica, desliga auto_best_hunt para não conflitar
+                opts["auto_best_hunt"] = acc_changes["auto_best_hunt"] = False
+                if conn.can_send and not conn.farm_paused:
+                    conn.queue_hunt(slug_v)
+        if "autoBestHunt" in sent and body.autoBestHunt is not None:
+            on = bool(body.autoBestHunt)
+            opts["auto_best_hunt"] = acc_changes["auto_best_hunt"] = on
+            if on:
+                # Ao ligar auto_best_hunt, limpa hunt fixa para não conflitar
+                opts["hunt_slug"] = ""
+                acc_changes["hunt_slug"] = None
+                conn._last_auto_hunt_at = 0.0
+        if "autoBestHuntRegion" in sent and body.autoBestHuntRegion is not None:
+            reg = (body.autoBestHuntRegion or "all").strip().lower() or "all"
+            opts["auto_best_hunt_region"] = acc_changes["auto_best_hunt_region"] = reg
+            conn._last_auto_hunt_at = 0.0
         if "pvpAuto" in sent and body.pvpAuto is not None:
             opts["pvp_auto"] = acc_changes["pvp_auto"] = bool(body.pvpAuto)
             conn.pvp.auto = bool(body.pvpAuto)

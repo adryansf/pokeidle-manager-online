@@ -17,6 +17,7 @@ import {
   type AdminAccount,
   type GlobalSettings,
   type ImportResult,
+  type NotificationItem,
   type ProxyInput,
 } from "@/lib/admin";
 import type { AccountStatus } from "@/lib/types";
@@ -777,10 +778,160 @@ function Group({ title, badge, children }: { title: string; badge?: React.ReactN
   );
 }
 
-export function NotificationsModal({ onClose }: { onClose: () => void }) {
+function fmtNotifTime(ts: number) {
+  const d = new Date(ts);
+  const diff = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  const clock = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  if (diff < 60) return `${clock} (agora)`;
+  const m = Math.floor(diff / 60);
+  if (m < 60) return `${clock} (há ${m}min)`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${clock} (há ${h}h)`;
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) + " " + clock;
+}
+
+const NOTIF_TONE: Record<NotificationItem["level"], string> = {
+  error: "border-[#7a2f27] bg-[#32140f]/80 text-poke-red",
+  warn: "border-[#7a5a1c] bg-[#33260e]/75 text-poke-gold",
+  ok: "border-[#2f6b3a] bg-[#16301c]/75 text-poke-green",
+  info: "border-line bg-tile/80 text-fg",
+};
+
+function NotificationCenterPanel({ onChanged }: { onChanged?: () => void }) {
+  const [items, setItems] = useState<NotificationItem[]>([]);
+  const [unread, setUnread] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await admin.notifications(100);
+      setItems(res.items);
+      setUnread(res.unreadCount);
+    } catch {
+      /* ignora erro transitório */
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const t = window.setInterval(() => void load(), 5000);
+    return () => window.clearInterval(t);
+  }, [load]);
+
+  const markAllRead = async () => {
+    setBusy(true);
+    try {
+      await admin.markNotificationsRead();
+      await load();
+      onChanged?.();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearAll = async () => {
+    setBusy(true);
+    try {
+      await admin.clearNotifications();
+      await load();
+      onChanged?.();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <Modal title="Notificações (Discord e Telegram)" onClose={onClose} wide>
-      <GlobalForm onlyNotifications />
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs text-mute">
+          Alertas de erros de compra, shinies, auto-centro, quedas e mercado (também enviados ao Telegram/Discord quando ativos).
+        </span>
+        <div className="flex items-center gap-1.5">
+          {unread > 0 && (
+            <button type="button" className="btn text-xs" disabled={busy} onClick={() => void markAllRead()}>
+              <Check className="size-3.5" aria-hidden />
+              Marcar lidas ({unread})
+            </button>
+          )}
+          {items.length > 0 && (
+            <button type="button" className="btn text-xs" disabled={busy} onClick={() => void clearAll()}>
+              <Trash2 className="size-3.5" aria-hidden />
+              Limpar
+            </button>
+          )}
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="py-6 text-center text-sm text-mute">Carregando alertas…</p>
+      ) : items.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-line py-8 text-center text-sm text-mute">
+          Nenhum alerta registrado ainda.
+          <br />
+          <span className="text-xs">Erros ao comprar na loja ou no mercado, shinies e quedas aparecerão aqui.</span>
+        </div>
+      ) : (
+        <ul className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+          {items.map((n) => (
+            <li
+              key={n.id}
+              className={`rounded-xl border px-3 py-2.5 text-xs sm:text-sm ${NOTIF_TONE[n.level]} ${n.read ? "opacity-75" : "ring-1 ring-poke-gold/40"}`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 font-bold">
+                  {!n.read && <span className="mr-1.5 inline-block size-2 rounded-full bg-poke-gold align-middle" />}
+                  {n.title}
+                </div>
+                <span className="tnum shrink-0 text-[11px] opacity-75">{fmtNotifTime(n.ts)}</span>
+              </div>
+              {n.message && <p className="mt-1 whitespace-pre-wrap text-xs text-fg/90">{n.message.replace(/\*\*/g, "")}</p>}
+              {n.fields && n.fields.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-fg/80">
+                  {n.fields.map((f, idx) => (
+                    <span key={idx}>
+                      <b className="opacity-80">{f.name}:</b> {f.value.replace(/\*\*/g, "")}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export function NotificationsModal({ onClose, onChanged }: { onClose: () => void; onChanged?: () => void }) {
+  const [tab, setTab] = useState<"alerts" | "channels">("alerts");
+  return (
+    <Modal title="Central de Notificações" onClose={onClose} wide>
+      <div className="flex gap-1.5 border-b border-line pb-2.5" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "alerts"}
+          data-active={tab === "alerts"}
+          onClick={() => setTab("alerts")}
+          className="btn text-xs font-bold sm:text-sm"
+        >
+          Central de Alertas
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "channels"}
+          data-active={tab === "channels"}
+          onClick={() => setTab("channels")}
+          className="btn text-xs font-bold sm:text-sm"
+        >
+          Canais (Discord / Telegram)
+        </button>
+      </div>
+      {tab === "alerts" ? <NotificationCenterPanel onChanged={onChanged} /> : <GlobalForm onlyNotifications />}
     </Modal>
   );
 }

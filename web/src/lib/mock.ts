@@ -16,7 +16,7 @@ export function startMock(emit: (m: SnapshotMessage) => void, setState: (s: Conn
       { id: 3289971 + i, speciesId: 248, name: "Tyranitar", level: 420, hp: 900, maxHp: 900, looktype: 60248, shiny: i === 0, slot: 1, active: false, quality: 1.55, potency: 2, grade: 4.8, ivTotal: 144 },
       { id: 3289981 + i, speciesId: 212, name: "Scizor", level: 390, hp: 750, maxHp: 800, looktype: 60212, shiny: false, slot: 2, active: false, quality: 1.4, potency: 2, grade: 4.1, ivTotal: 138 },
     ],
-    automation: { autoCatch: true, autoPotion: false, potionThreshold: 10, potionQty: 100, autoBallRestock: false, ballThreshold: 10, ballQty: 100, autoPotionFallback: true, autoCenter: true, autoCenterHpPct: 20, goldReserve: 0, gameAutoPotion: true, hpLimiar: 0.4, hpLimiarPct: 40, pvpAuto: false },
+    automation: { autoCatch: true, autoPotion: false, potionThreshold: 10, potionQty: 100, autoBallRestock: false, ballThreshold: 10, ballQty: 100, autoPotionFallback: true, autoCenter: true, autoCenterHpPct: 20, goldReserve: 0, huntSlug: "", autoBestHunt: false, autoBestHuntRegion: "all", gameAutoPotion: true, hpLimiar: 0.4, hpLimiarPct: 40, pvpAuto: false },
     xp: { atual: 52_000_000_000 + i * 3e9, nivel: 51_700_000_000 + i * 3e9, proximo: 52_150_000_000 + i * 3e9 },
     pass: [{ ultimo: D - 1, degrau: 6, total: 5, vipAte: 0, ciclos: 0, vipPegos: 0 }, { ultimo: D, degrau: 12, total: 40, vipAte: Date.now() + 9 * 86_400_000, ciclos: 1, vipPegos: 0b11111111111, ultimoVip: D }, { ultimo: D - 3, degrau: 3, total: 3, vipAte: 0, ciclos: 0, vipPegos: 0 }, null][i],
     map: [{ region: "outland", label: "Outland 2", outland: { tier: 2, label: "Outland 2", mult: 1.25 } }, { region: "hoenn", label: "Hoenn", outland: null }, { region: "kanto", label: "Kanto", outland: null }, { region: "outland", label: "Outland 1", outland: { tier: 1, label: "Outland 1", mult: 1 } }][i],
@@ -399,6 +399,29 @@ function installMockApi(accs: AccountSnapshot[]) {
       await wait();
       return json({ ok: true, confirmed: true, claim: { degrau: 7, premios: [{ trilha: "free", tipo: "coins", qtd: 1_000_000 }, { trilha: "free", tipo: "boost", boost: "loot", horas: 1 }] } });
     }
+    if (path === "/api/notifications") {
+      if (init?.method === "DELETE") return json({ ok: true });
+      return json({
+        unreadCount: 1,
+        items: [
+          {
+            id: 1,
+            ts: Date.now() - 25_000,
+            level: "error",
+            title: "Treinador1 — Erro na compra automática",
+            message: "❌ Não foi possível comprar 100× Golden Potion.",
+            fields: [
+              { name: "Motivo", value: "Gold insuficiente" },
+              { name: "Gold atual", value: "12,400" },
+            ],
+            read: false,
+          },
+        ],
+      });
+    }
+    if (path === "/api/notifications/read" && init?.method === "POST") {
+      return json({ ok: true });
+    }
     if (path === "/api/accounts" && (!init?.method || init.method === "GET")) return json({ max: null, accounts: [] });
     if (path === "/api/proxies") {
       if (init?.method === "POST") {
@@ -470,6 +493,20 @@ function installMockApi(accs: AccountSnapshot[]) {
           { id: 1, ts: now - 45_000, accountId: 2, account: "acc2", nick: "Treinador2", name: "Caterpie", pokeId: 10, looktype: 60010, level: 95, shiny: false, ballId: 2, ballName: "Great Ball", success: false, chance: 34.0, huntSlug: "caterpie" },
         ],
       });
+    }
+    m = path.match(/^\/api\/accounts\/(\d+)\/farm-pause$/);
+    if (m && init?.method === "POST") {
+      await wait();
+      const a = accs[Number(m[1]) - 1];
+      const body = init.body ? (JSON.parse(String(init.body)) as { paused?: boolean }) : {};
+      a.farmPaused = body.paused === undefined ? !a.farmPaused : Boolean(body.paused);
+      return json({ ok: true, farmPaused: a.farmPaused, sentCenter: a.farmPaused });
+    }
+    if (path === "/api/bulk/farm-pause" && init?.method === "POST") {
+      await wait();
+      const { paused } = JSON.parse(String(init.body)) as { paused: boolean };
+      for (const a of accs) a.farmPaused = paused;
+      return json({ ok: true, farmPaused: paused, count: accs.length });
     }
     m = path.match(/^\/api\/accounts\/(\d+)\/center$/);
     if (m && init?.method === "POST") {

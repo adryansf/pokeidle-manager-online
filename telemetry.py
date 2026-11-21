@@ -260,6 +260,9 @@ def _automation_snapshot(c: "AccountConnection") -> dict:
         "autoCenter": bool(c.acc.auto_center),
         "autoCenterHpPct": int(c.acc.auto_center_hp_pct),
         "goldReserve": int(c.acc.gold_reserve),
+        "huntSlug": c.acc.hunt_slug or "",
+        "autoBestHunt": bool(c.acc.auto_best_hunt),
+        "autoBestHuntRegion": c.acc.auto_best_hunt_region or "all",
         "gameAutoPotion": bool(auto.get("autoPotion", True)),
         "hpLimiar": raw_limiar,
         "hpLimiarPct": hp_limiar_pct,
@@ -284,6 +287,8 @@ def account_snapshot(c: "AccountConnection", proxy_names: dict[tuple, str] | Non
         "status": _STATUS.get(c.state, "offline"),
         "state": c.state.value,  # estado detalhado, p/ debug
         "paused": bool(getattr(c, "manual_paused", False) or c.state == State.PAUSED_MANUAL),
+        "farmPaused": bool(getattr(c, "farm_paused", False)),
+        "farmPausePending": bool(getattr(c, "_farm_pause_pending_center", False)),
         "proxy": _proxy_snapshot(c, proxy_names),
         "blocked": c.block,      # {kind, detail} quando o jogo recusou a conta
         "lastReason": c.last_reason,

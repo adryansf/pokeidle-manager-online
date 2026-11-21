@@ -53,6 +53,9 @@ export interface AccountAutomation {
   autoCenter: boolean;
   autoCenterHpPct: number;
   goldReserve: number;
+  huntSlug?: string;
+  autoBestHunt?: boolean;
+  autoBestHuntRegion?: string;
   gameAutoPotion: boolean;
   hpLimiar?: number | null;
   hpLimiarPct?: number | null;
@@ -106,6 +109,8 @@ export interface AccountSnapshot {
   status: AccountStatus;
   state?: string;
   paused?: boolean;
+  farmPaused?: boolean;
+  farmPausePending?: boolean;
   proxy?: ProxyBadgeInfo | null;
   blocked?: { kind: string; detail: string } | null;
   lastReason?: string;

@@ -93,6 +93,7 @@ export interface LiveEvent {
   chance?: number | null;
   qty?: number | null;
   cost?: number | null;
+  reason?: string | null;
 }
 
 export interface LiveHuntSpecies {
@@ -175,6 +176,9 @@ export type AutomationPatch = Partial<{
   autoCenter: boolean;
   autoCenterHpPct: number;
   goldReserve: number;
+  huntSlug: string;
+  autoBestHunt: boolean;
+  autoBestHuntRegion: string;
   gameAutoPotion: boolean;
   hpLimiarPct: number;
   pvpAuto: boolean;
@@ -191,6 +195,12 @@ export const actions = {
   cancelHuntQueue: (accId: string) => call<{ ok: boolean }>("DELETE", `/api/accounts/${numId(accId)}/hunt/queue`),
   pause: (accId: string, paused?: boolean) =>
     call<PauseResult>("POST", `/api/accounts/${numId(accId)}/pause`, paused === undefined ? {} : { paused }),
+  farmPause: (accId: string, paused?: boolean) =>
+    call<{ ok: boolean; farmPaused: boolean; sentCenter?: boolean; queued?: boolean; resumeSlug?: string | null }>(
+      "POST",
+      `/api/accounts/${numId(accId)}/farm-pause`,
+      paused === undefined ? {} : { paused },
+    ),
   live: (accId: string) => call<AccountLive>("GET", `/api/accounts/${numId(accId)}/live`),
   goCenter: (accId: string) => call<{ ok: boolean }>("POST", `/api/accounts/${numId(accId)}/center`),
   setAutomation: (accId: string, patch: AutomationPatch) =>
@@ -205,6 +215,7 @@ export const actions = {
     return call<CapturesResponse>("GET", `/api/captures${qs ? `?${qs}` : ""}`);
   },
   bulkPause: (paused: boolean) => call<{ ok: boolean; paused: boolean; count: number }>("POST", "/api/bulk/pause", { paused }),
+  bulkFarmPause: (paused: boolean) => call<{ ok: boolean; farmPaused: boolean; count: number }>("POST", "/api/bulk/farm-pause", { paused }),
   bulkCenter: () => call<{ ok: boolean; sent: string[]; skipped: string[] }>("POST", "/api/bulk/center"),
   bulkEquip: (kind: "ball" | "potion", id: number) =>
     call<{ ok: boolean; updated: string[]; skipped: string[] }>("POST", "/api/bulk/equip", { kind, id }),

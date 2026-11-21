@@ -17,6 +17,7 @@ import { UpdateBanner } from "@/components/UpdateCard";
 import { ChatDock, ChatPopoutHost, ChatView, useDockMode } from "@/components/Sidebars";
 import { ConfirmDialog, Frame } from "@/components/ui";
 import { actions } from "@/lib/actions";
+import { admin } from "@/lib/admin";
 import { startChat, totalUnread, useChat } from "@/lib/chat";
 import { useAccountIds, useAccountsMap } from "@/lib/telemetry";
 import { useCardOrder } from "@/lib/useCardOrder";
@@ -174,7 +175,21 @@ export default function App() {
   const [tab, setTab] = useState<Tab>(readTab);
   const [mode, setMode] = useState<CardMode>("resumo");
   const [notifyOpen, setNotifyOpen] = useState(false);
+  const [unreadAlerts, setUnreadAlerts] = useState(0);
   const [proxyCenterOpen, setProxyCenterOpen] = useState(false);
+
+  const refreshAlerts = useCallback(() => {
+    admin
+      .notifications(1)
+      .then((r) => setUnreadAlerts(r.unreadCount))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshAlerts();
+    const t = window.setInterval(refreshAlerts, 6000);
+    return () => window.clearInterval(t);
+  }, [refreshAlerts]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
@@ -297,13 +312,18 @@ export default function App() {
                       </button>
                       <button
                         type="button"
-                        aria-label="Notificações (Discord e Telegram)"
-                        className="btn"
+                        aria-label="Central de Notificações (Alertas, Discord e Telegram)"
+                        className="btn relative"
                         onClick={() => setNotifyOpen(true)}
-                        title="Configurar notificações do Discord e/ou Telegram"
+                        title="Abrir Central de Notificações e configurar Discord / Telegram"
                       >
                         <Bell className="size-4 text-poke-gold" aria-hidden />
                         <span className="hidden sm:inline">Notificações</span>
+                        {unreadAlerts > 0 && (
+                          <span className="tnum -mr-0.5 rounded-full bg-poke-red px-1.5 py-0.5 text-[10px] font-black leading-none text-void">
+                            {unreadAlerts > 99 ? "99+" : unreadAlerts}
+                          </span>
+                        )}
                       </button>
                       <button
                         type="button"
@@ -326,7 +346,17 @@ export default function App() {
             </div>
           </header>
 
-          <AnimatePresence>{notifyOpen && <NotificationsModal onClose={() => setNotifyOpen(false)} />}</AnimatePresence>
+          <AnimatePresence>
+            {notifyOpen && (
+              <NotificationsModal
+                onClose={() => {
+                  setNotifyOpen(false);
+                  refreshAlerts();
+                }}
+                onChanged={refreshAlerts}
+              />
+            )}
+          </AnimatePresence>
           <AnimatePresence>{proxyCenterOpen && <ProxyCenterModal onClose={() => setProxyCenterOpen(false)} />}</AnimatePresence>
           <AnimatePresence>{bulkOpen && <BulkActionsModal onClose={() => setBulkOpen(false)} />}</AnimatePresence>
 

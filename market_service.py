@@ -26,7 +26,7 @@ import market_stats
 from game_data import ITEM_NAMES, item_meta
 from item_labels import display_name, is_zmove_item, item_icon_path, item_name
 from market import MarketError
-from notify import BLUE, GOLD, GREEN
+from notify import BLUE, GOLD, GREEN, RED
 
 if TYPE_CHECKING:
     from manager import AccountManager
@@ -599,6 +599,13 @@ class MarketService:
         # Contas que compram o mesmo anúncio ao mesmo tempo saem juntas, numa mensagem só.
         if status == "comprado":
             self._queue_win(rid, aid, spec, label, moeda_nome, conn.acc.nick, qty, paid)
+        elif status in ("erro", "recusado"):
+            self.notifier.send(
+                f"❌ Erro na compra do Mercado ({conn.acc.nick})",
+                f"Falha ao comprar **{qty}× {label}** (#{aid}).",
+                RED,
+                [("Status", status, True), ("Motivo", detail or "recusado pelo servidor", False)],
+            )
 
     def _queue_win(self, rid: int, aid: int, spec: dict, label: str, moeda_nome: str, nick: str, qty: int, paid: int) -> None:
         key = (rid, aid)

@@ -93,6 +93,7 @@ class Notifier:
         telegram_token: str | None = None,
         telegram_chat_id: str | None = None,
         telegram_enabled: bool = True,
+        store=None,
     ) -> None:
         use_env = url is None
         self.url = (os.getenv("DISCORD_WEBHOOK_URL", "") if use_env else (url or "")).strip()
@@ -104,6 +105,7 @@ class Notifier:
             os.getenv("TELEGRAM_CHAT_ID", "") if (telegram_chat_id is None and use_env) else (telegram_chat_id or "")
         ).strip()
         self.telegram_enabled = bool(telegram_enabled)
+        self._store = store
         self._queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
 
     @classmethod
@@ -114,9 +116,11 @@ class Notifier:
             telegram_token=store.get_setting("telegram_bot_token"),
             telegram_chat_id=store.get_setting("telegram_chat_id"),
             telegram_enabled=store.get_setting("telegram_enabled") != "0",
+            store=store,
         )
 
     def apply_store(self, store) -> None:
+        self._store = store
         self.url = store.get_setting("discord_webhook").strip()
         self.discord_enabled = store.get_setting("discord_enabled") != "0"
         self.telegram_token = store.get_setting("telegram_bot_token").strip()
@@ -147,9 +151,16 @@ class Notifier:
              fields: list[tuple[str, str, bool]] | None = None,
              thumbnail: str | None = None,
              *, targets: set[str] | None = None) -> None:
-        """Enfileira uma notificação (sem await). Descarta se desligado ou fila cheia.
+        """Enfileira uma notificação (sem await) e grava na Central de Notificações do painel.
         `thumbnail` (se dado) vira a imagem no canto superior direito do embed do Discord.
         `targets` (opcional) restringe o envio a {'discord'} ou {'telegram'} (ex.: botão de teste)."""
+        if self._store is not None and hasattr(self._store, "add_notification"):
+            level = {RED: "error", GREEN: "ok", GOLD: "warn"}.get(color, "info")
+            plain_fields = [{"name": n, "value": v} for n, v, _ in (fields or [])]
+            try:
+                self._store.add_notification(title, description, level=level, fields=plain_fields)
+            except Exception:  # noqa: BLE001 - falha no histórico não interrompe envio
+                log.debug("falha ao salvar notificação no banco")
         if targets is None:
             if not self.enabled:
                 return

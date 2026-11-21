@@ -77,6 +77,19 @@ export interface BulkProxyResult {
   errors: string[];
   proxies: SavedProxy[];
 }
+export interface NotificationItem {
+  id: number;
+  ts: number;
+  level: "info" | "ok" | "warn" | "error";
+  title: string;
+  message: string;
+  fields: { name: string; value: string }[];
+  read: boolean;
+}
+export interface NotificationsResponse {
+  unreadCount: number;
+  items: NotificationItem[];
+}
 export interface TestResult {
   ok: boolean;
   kind: string;
@@ -221,6 +234,10 @@ export const admin = {
   saveSettings: (b: Record<string, unknown>) => call<GlobalSettings>("PUT", "/api/settings", b),
   testWebhook: (gateway?: "discord" | "telegram" | "all") =>
     call<{ ok: boolean; gateway?: string }>("POST", `/api/settings/test-webhook${gateway ? `?gateway=${gateway}` : ""}`),
+  notifications: (limit = 80) => call<NotificationsResponse>("GET", `/api/notifications?limit=${limit}`),
+  markNotificationsRead: (id?: number) =>
+    call<{ ok: boolean }>("POST", "/api/notifications/read", id === undefined ? {} : { id }),
+  clearNotifications: () => call<{ ok: boolean }>("DELETE", "/api/notifications"),
   update: () => call<UpdateState>("GET", "/api/update"),
   checkUpdate: () => call<UpdateState>("POST", "/api/update/check"),
   applyUpdate: () => call<UpdateResult>("POST", "/api/update/apply"),

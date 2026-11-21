@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { useScrollLock } from "@/lib/scrollLock";
-import { Loader2, X } from "lucide-react";
+import { Check, Copy, Loader2, X } from "lucide-react";
 import { Component, useEffect, useMemo, useState, type ReactNode } from "react";
 import { TypeChip } from "@/components/HuntRow";
 import { PokemonSprite } from "@/components/Sprites";
@@ -523,10 +523,73 @@ const loadSheet = (s: SheetSource) =>
   : s.kind === "public" ? teamApi.publicPokemon(s.nick, s.id)
   : teamApi.listing(s.id);
 
+function formatForChatGpt(d: PokemonSheetPayload): string {
+  const pk = d.pokemon;
+  const sp = d.species;
+  const lines: string[] = [];
+  if (pk) {
+    lines.push(`# Pokémon (PokeIdle)`);
+    lines.push(`- **Nome:** ${pk.nome}${pk.shiny ? " ✨ (SHINY)" : ""}`);
+    if (pk.tipos?.length) lines.push(`- **Tipos:** ${pk.tipos.join(" / ")}`);
+    lines.push(`- **Nível:** ${pk.level}`);
+    if (pk.nota != null) lines.push(`- **Nota:** ${pk.nota}${d.calc?.faixa ? ` (${d.calc.faixa})` : ""}`);
+    if (pk.quality != null) lines.push(`- **Qualidade:** ${pk.quality}`);
+    if (pk.potencia != null) lines.push(`- **Potência:** P${pk.potencia}`);
+    const ivTotal = d.calc?.ivTotal ?? (pk.ivs ? Object.values(pk.ivs).reduce((a, b) => a + (Number(b) || 0), 0) : null);
+    if (ivTotal != null) lines.push(`- **IV Total:** ${ivTotal}/186`);
+    if (d.pvePower) lines.push(`- **Poder PVE:** ${nf.format(d.pvePower)}`);
+    if (d.pvpPower) lines.push(`- **Poder PVP:** ${nf.format(d.pvpPower)} (Nível PVP: ${d.pvpLevel})`);
+    if (d.combatHp) lines.push(`- **HP de Combate:** ${nf.format(d.combatHp)}`);
+    if (pk.tmElemental) lines.push(`- **TM Elemental:** ${pk.tmElemental}`);
+    if (pk.stats || pk.ivs) {
+      lines.push(`\n## Stats & IVs`);
+      for (const [key, label, ivKey] of STAT_LABEL) {
+        const st = pk.stats?.[key];
+        const iv = pk.ivs?.[ivKey];
+        const ref = pk.refino?.[key];
+        const extra = [iv != null ? `IV ${iv}` : null, ref ? `Refino +${ref}` : null].filter(Boolean).join(" · ");
+        lines.push(`- **${label}:** ${st != null ? nf.format(st) : "—"}${extra ? ` (${extra})` : ""}`);
+      }
+    }
+    if (d.calc?.finais?.length) {
+      lines.push(`\n## Evoluções finais (Calculadora)`);
+      for (const f of d.calc.finais) {
+        lines.push(`- ${f.name}: nota ${f.nota} (${f.faixa})${f.mercado ? " · aceito no mercado" : ""}`);
+      }
+    }
+  }
+  if (sp) {
+    lines.push(`\n## Espécie: ${sp.name}`);
+    const types = [sp.type1, sp.type2].filter(Boolean).join(" / ");
+    if (types) lines.push(`- **Tipos:** ${types} · **Raridade:** ${sp.rarity} · **Alcance:** ${d.range}`);
+    if (sp.attacks?.length) {
+      lines.push(`- **Golpes:** ${sp.attacks.map((a) => `${a.name} (${a.type}, Pwr ${a.power}, CD ${(a.cooldownMs / 1000).toFixed(1)}s)`).join("; ")}`);
+    }
+  }
+  if (d.listing) {
+    lines.push(`\n## Anúncio no Mercado`);
+    lines.push(`- **Preço:** ${nf.format(d.listing.price)} ${d.listing.currency === "orb" ? "Gemas" : "Gold"} (anúncio #${d.listing.id})`);
+  }
+  return lines.join("\n");
+}
+
 export function PokemonSheet({ source, onClose }: { source: SheetSource; onClose: () => void }) {
   const [tab, setTab] = useState<"pokemon" | "calc" | "species">("pokemon");
   const [data, setData] = useState<PokemonSheetPayload | null>(null);
   const [err, setErr] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const copyChatGpt = async () => {
+    if (!data) return;
+    const text = formatForChatGpt(data);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      window.prompt("Copie (Ctrl+C) e cole no ChatGPT:", text);
+    }
+  };
 
   useEffect(() => {
     let live = true;
@@ -563,7 +626,20 @@ export function PokemonSheet({ source, onClose }: { source: SheetSource; onClose
               <button key={id} role="tab" aria-selected={tab === id} className="btn" data-active={tab === id} onClick={() => setTab(id)}>{label}</button>
             ))}
           </div>
-          <button type="button" className="btn" onClick={onClose} aria-label="Fechar a ficha"><X className="size-4" aria-hidden /></button>
+          <div className="flex items-center gap-1.5">
+            {data && (
+              <button
+                type="button"
+                className="btn px-2.5 py-1.5 text-xs font-bold"
+                onClick={() => void copyChatGpt()}
+                title="Copiar ficha estruturada para colar no ChatGPT"
+              >
+                {copied ? <Check className="size-3.5 text-poke-green" aria-hidden /> : <Copy className="size-3.5 text-poke-gold" aria-hidden />}
+                <span>{copied ? "Copiado!" : "Copiar p/ ChatGPT"}</span>
+              </button>
+            )}
+            <button type="button" className="btn" onClick={onClose} aria-label="Fechar a ficha"><X className="size-4" aria-hidden /></button>
+          </div>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
           {!data && !err && <div className="flex justify-center py-16 text-mute"><Loader2 className="size-6 animate-spin" aria-label="Carregando" /></div>}

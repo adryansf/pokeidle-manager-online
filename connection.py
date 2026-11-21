@@ -237,10 +237,15 @@ class AccountConnection:
             self.hunt.on_kill = lambda xp, gold: self.daily.add_kill(self.acc.nick, xp, gold)
         self.balls = BallManager(account.name, self.estado, account.ball_priority, enabled=account.auto_catch)
         self.shop = ShopManager(account.name, self.estado)
+        self.shop.on_buy_error = self._on_buy_error
         self.market = MarketClient(account.name, self.estado)
         self.pending_hunt: str | None = None      # hunt pedida no painel, aguardando a trava de combate acabar
+        self.farm_paused: bool = False            # conta online, mas parada no Centro Pokémon sem farmar
+        self._farm_pause_pending_center: bool = False
+        self._farm_resume_slug: str | None = None
         self._last_potion_fallback_at: float = 0.0
         self._last_auto_center_at: float = 0.0
+        self._last_auto_hunt_at: float = 0.0
         self._center_return_slug: str | None = None
         self.restockers: list[AutoRestock] = []
         self.rebuild_restockers()
@@ -419,7 +424,9 @@ class AccountConnection:
                 self.shop.bind(ws)
                 self.market.bind(ws)
                 self.pvp.bind(ws)
-                if self.acc.hunt_slug and self.acc.hunt_slug != self.estado.get("huntSlug"):
+                if self.farm_paused:
+                    self._farm_pause_pending_center = True
+                elif self.acc.hunt_slug and self.acc.hunt_slug != self.estado.get("huntSlug"):
                     await self.hunt.select_hunt(self.acc.hunt_slug)
                 if self.on_online:
                     try:
@@ -520,6 +527,24 @@ class AccountConnection:
                 self._silent_close = True
                 await ws.close(code=4000, reason="sem frames")
                 return
+
+    def _on_buy_error(self, kind: str, item_id: int, qty: int, reason: str) -> None:
+        from game_data import BALL_NAMES
+
+        if kind == "ball":
+            label = BALL_NAMES.get(item_id) or f"Bola #{item_id}"
+        else:
+            nos = self.itens_nossos.get(item_id) or {}
+            label = nos.get("name") or item_name(item_id) or f"Item #{item_id}"
+        gold = int(self.estado.get("gold") or 0)
+        self.hunt._push_live_event("buy_error", name=label, qty=qty, reason=reason)
+        if self.notifier:
+            self.notifier.send(
+                f"{self.acc.nick} — Erro na compra automática",
+                f"❌ Não foi possível comprar **{qty}× {label}**.",
+                RED,
+                [("Motivo", reason, False), ("Gold atual", f"{gold:,}", True)],
+            )
 
     def _on_pass(self, msg: dict) -> None:
         r = msg.get("resgate")
@@ -696,10 +721,99 @@ class AccountConnection:
             if not self.can_send:
                 continue
             try:
+                await self._check_farm_pause()
                 await self._check_potion_fallback()
                 await self._check_auto_center()
+                await self._check_auto_hunt()
             except Exception as e:  # noqa: BLE001
                 log.debug("[%s] safety_loop erro ignorado: %r", self.acc.name, e)
+
+    async def set_farm_pause(self, paused: bool) -> dict:
+        """Pausa o farm mantendo a conta ONLINE: envia ao Centro Pokémon e não entra em nenhuma hunt até retomar."""
+        self.farm_paused = bool(paused)
+        if self.farm_paused:
+            cur_slug = (self.hunt.session.slug if self.hunt.session else None) or self.estado.get("huntSlug")
+            if cur_slug:
+                self._farm_resume_slug = cur_slug
+            self.pending_hunt = None
+            self._center_return_slug = None
+            if self.can_send and self.combat_lock_ms() == 0:
+                await self.hunt.go_to_center()
+                self._farm_pause_pending_center = False
+                self.hunt._push_live_event("center", name=self.acc.nick, manual=True)
+                log.info("[%s] farm pausado: enviado ao Centro Pokémon (retomará %s)", self.acc.name, self._farm_resume_slug)
+                return {"ok": True, "farmPaused": True, "sentCenter": True, "queued": False}
+            self._farm_pause_pending_center = True
+            log.info("[%s] farm pausado: aguardando fim do combate para ir ao Centro Pokémon", self.acc.name)
+            return {"ok": True, "farmPaused": True, "sentCenter": False, "queued": True}
+        else:
+            self._farm_pause_pending_center = False
+            target = self._farm_resume_slug or self.acc.hunt_slug
+            if target and self.can_send:
+                if self.combat_lock_ms() > 0:
+                    self.queue_hunt(target)
+                else:
+                    await self.hunt.select_hunt(target)
+            log.info("[%s] farm retomado (alvo=%s)", self.acc.name, target)
+            return {"ok": True, "farmPaused": False, "resumeSlug": target}
+
+    async def _check_farm_pause(self) -> None:
+        if not self.farm_paused or not self._farm_pause_pending_center:
+            return
+        if self.combat_lock_ms() > 0:
+            return
+        await self.hunt.go_to_center()
+        self._farm_pause_pending_center = False
+        self.hunt._push_live_event("center", name=self.acc.nick, manual=True)
+        log.info("[%s] combate encerrado: conta enviada ao Centro Pokémon (farm pausado)", self.acc.name)
+
+    def _pick_best_hunt_for_level(self) -> dict | None:
+        """Escolhe a melhor hunt liberada pelo nível do treinador (respeitando filtro de região)."""
+        level = int(self.estado.get("level") or 0)
+        region_filter = (self.acc.auto_best_hunt_region or "all").strip().lower()
+        candidates: list[dict] = []
+        for h in self.hunts:
+            if not isinstance(h, dict) or not h.get("slug"):
+                continue
+            req_lvl = int(h.get("nivel") or 0)
+            if req_lvl > level:
+                continue
+            if region_filter != "all":
+                h_reg = str(h.get("regiao") or h.get("area") or "").strip().lower()
+                if h_reg != region_filter:
+                    continue
+            candidates.append(h)
+        if not candidates:
+            return None
+        candidates.sort(key=lambda h: (int(h.get("nivel") or 0), int(h.get("totalSpawns") or 0)), reverse=True)
+        return candidates[0]
+
+    async def _check_auto_hunt(self) -> None:
+        if self.farm_paused or self._center_return_slug:
+            return
+        now = time.monotonic()
+        if now - self._last_auto_hunt_at < 20.0:
+            return
+        cur_slug = (self.hunt.session.slug if self.hunt.session else None) or self.estado.get("huntSlug")
+        if self.acc.auto_best_hunt:
+            best = self._pick_best_hunt_for_level()
+            if best and best["slug"] != cur_slug and self.pending_hunt != best["slug"]:
+                self._last_auto_hunt_at = now
+                self.queue_hunt(best["slug"])
+                bname = best.get("nome") or best["slug"]
+                log.info("[%s] Auto-Hunt: trocando para %s (Nv.%s)", self.acc.name, bname, best.get("nivel"))
+                if self.notifier:
+                    self.notifier.send(
+                        self.acc.nick,
+                        f"🗺️ **Auto-Hunt:** trocando automaticamente para **{bname}** (Nv. {best.get('nivel', 0)}).",
+                        GREEN,
+                    )
+        elif self.acc.hunt_slug:
+            target = self.acc.hunt_slug
+            if target != cur_slug and self.pending_hunt != target:
+                if any(isinstance(h, dict) and h.get("slug") == target for h in self.hunts):
+                    self._last_auto_hunt_at = now
+                    self.queue_hunt(target)
 
     def _potion_stock(self, pid: int) -> int:
         return int((self.estado.get("items") or {}).get(str(pid), 0) or 0)
@@ -732,7 +846,7 @@ class AccountConnection:
                  self.acc.name, pname, self._potion_stock(next_id))
 
     async def _check_auto_center(self) -> None:
-        if not self.acc.auto_center:
+        if not self.acc.auto_center or self.farm_paused:
             return
         pk = self.hunt.active_pokemon()
         if not pk:

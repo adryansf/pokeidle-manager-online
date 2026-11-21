@@ -167,6 +167,8 @@ function formatLiveEvent(ev: LiveEvent): string {
       return `🗺️ Entrou na hunt ${ev.name || ev.slug || "?"}`;
     case "buy":
       return `🛒 Comprou ${ev.qty ?? 1}× ${ev.name || "item"}${ev.cost ? ` (${fmtShort(ev.cost)}g)` : ""}`;
+    case "buy_error":
+      return `❌ Erro ao comprar ${ev.qty ?? 1}× ${ev.name || "item"}${ev.reason ? ` — ${ev.reason}` : ""}`;
     case "potion":
       return `🧪 Fallback de poção: trocou para ${ev.name || "outra poção"}${ev.qty ? ` (×${fmtShort(ev.qty)})` : ""}`;
     case "center":
@@ -187,6 +189,8 @@ function eventTone(ev: LiveEvent) {
         : "border-line bg-void/60 text-mute";
     case "kill":
       return "border-line bg-tile/70 text-fg";
+    case "buy_error":
+      return "border-[#7a2f27] bg-[#32140f]/80 text-poke-red";
     case "buy":
     case "potion":
     case "center":
