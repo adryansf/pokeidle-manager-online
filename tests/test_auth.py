@@ -190,3 +190,32 @@ def test_desktop_app_exposed_on_network_still_trusts_its_own_pc(store, tmp_path,
     assert remote["needsCode"] is True
     via_proxy = TestClient(app, client=("127.0.0.1", 50000)).get("/api/auth/status", headers={"x-forwarded-for": "8.8.8.8"})
     assert via_proxy.json()["needsCode"] is True                  # atrás de proxy não vale como "dono do PC"
+
+
+def test_csrf_origin_check_blocks_cross_origin_mutations(store, tmp_path, monkeypatch):
+    c, _ = make(store, tmp_path, monkeypatch)
+    c.post("/api/auth/setup", json={"password": PW})
+    # Origin de outro domínio/porta é barrado em rotas mutáveis
+    r = c.post("/api/auth/logout", headers={"Origin": "https://evil.example", "Host": "localhost:8080"})
+    assert r.status_code == 403
+    # Origin do próprio domínio (ou via X-Forwarded-Host do Traefik/Dokploy) passa normalmente
+    r2 = c.post("/api/auth/logout", headers={"Origin": "https://painel.meudominio.com",
+                                             "X-Forwarded-Host": "painel.meudominio.com"})
+    assert r2.status_code == 200
+
+
+def test_trust_proxy_reads_forwarded_ip_from_docker_network(store, monkeypatch):
+    from types import SimpleNamespace
+    from auth import Auth
+
+    def req(peer, fwd):
+        return SimpleNamespace(client=SimpleNamespace(host=peer), headers={"x-forwarded-for": fwd})
+
+    a = Auth(store, exposed=True, env_token="segredo")
+    # Sem TRUST_PROXY=1, IP de bridge do Docker não confia em X-Forwarded-For
+    monkeypatch.delenv("TRUST_PROXY", raising=False)
+    assert a.client_ip(req("172.18.0.2", "203.0.113.50")) == "172.18.0.2"
+    # Com TRUST_PROXY=1 (Dokploy / Traefik), confia na bridge privada do Docker, mas nunca em IP público
+    monkeypatch.setenv("TRUST_PROXY", "1")
+    assert a.client_ip(req("172.18.0.2", "203.0.113.50")) == "203.0.113.50"
+    assert a.client_ip(req("9.9.9.9", "203.0.113.50")) == "9.9.9.9"

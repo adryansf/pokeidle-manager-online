@@ -1,199 +1,135 @@
-# pokeidle-manager
+# PokéIdle Manager Online
 
-Bot headless em Python para gerenciar até 4 contas do jogo **pokeidle.io** ao mesmo
-tempo, pensado para rodar em background (na sua máquina ou numa VPS Linux, sem
-navegador), com um painel web para acompanhar e configurar tudo.
+Gerenciador headless em Python (FastAPI + WebSockets) com dashboard web em React/TypeScript para administrar até **4 contas simultâneas** do jogo **pokeidle.io** em background — ideal para rodar 24/7 em container Docker (**Dokploy** / VPS Linux) ou localmente no Windows/Linux/macOS.
 
-> **Projeto não oficial.** Não tem relação com o pokeidle.io nem com seus
-> desenvolvedores.
->
-> Segundo os [Termos de Uso do jogo](https://pokeidle.io/terms#conduta) (seção
-> "Conduta"), automações são permitidas, desde que sigam as mesmas regras de quem
-> joga na mão. Ou seja, **não** podem:
->
-> - explorar falhas (bugs) ou duplicar itens, Pokémon, Coins, diamantes ou Gemas;
-> - burlar limites do jogo, como o de contas, ou as travas e retenções do Mercado;
-> - sobrecarregar o servidor.
->
-> **Limite de contas:** cada pessoa pode ter até **4 contas** no total, somando
-> todas as redes e aparelhos. Cada rede também pode ter no máximo 4 contas
-> conectadas ao mesmo tempo. Por isso o bot gerencia **no máximo 4 contas**.
-> Passar disso pode banir todas as suas contas.
->
-> Os termos podem mudar: leia a versão atual antes de usar. Você é o único
-> responsável pelo uso que fizer deste projeto.
+> **Aviso Legal:** Projeto independente e não oficial, sem vínculo com o pokeidle.io.
+> Segundo os [Termos de Uso do jogo](https://pokeidle.io/terms#conduta), cada pessoa pode ter no máximo **4 contas** no total (e até 4 conexões por IP/rede). Por isso o sistema possui trava rígida de no máximo **4 contas**. O uso é de inteira responsabilidade do usuário.
 
-## Recursos
+---
 
-- Conexão WebSocket por conta (handshake, heartbeat, reconexão automática)
-- **Adicionar e configurar contas pelo painel**, sem editar arquivos, com login por senha
-- Proxy (SOCKS5/HTTP) individual por conta, com botão de testar
-- Cooldown ao detectar login externo (close code `4001`)
-- Detecção de token vencido/conta banida, com aviso no painel (o bot não fica reconectando à toa)
-- Renovação automática do token da sessão
-- Captura automática de Balls
-- Reposição automática de Potions e Balls na loja
-- Visão de inventário por conta
-- Alertas no Discord (queda/volta, item raro, shiny encontrado ou capturado, relatório diário)
-- Shinies vistos e capturados na sessão, exibidos fora de Outland e preservados até zerar a sessão
-- **Aba Mercado:** preços e média de 7 dias de todos os itens (com selo "barato"), vitrine de Pokémon com os filtros do jogo, histórico de vendas do servidor, anúncios e carteira de Gemas (somente leitura), calculadora de comissão, alertas no Discord e compra automática (sniper, desligada por padrão)
-- **Aba Mapa:** escolha uma conta e mande ela caçar em qualquer área do jogo, sem entrar nele. Regiões, filtros por tipo e nível, fraquezas e drops. Áreas acima do nível aparecem trancadas. Se a conta estiver em combate, o bot espera a trava acabar e troca sozinho
-- **Dashboard:** clique na poção ou na bola de um card para trocá-la (se estiver sem estoque, o bot compra) e arraste os cards para mudar a ordem
-- Telemetria via FastAPI (`GET /api/telemetry`, `WS /ws/telemetry`) e dashboard React
+## Principais Recursos
 
-## Requisitos
+- **Gestão Multi-Conta (até 4 contas):**
+  - Conexão WebSocket persistente por conta com heartbeat, watchdog anti-travamento e reconexão inteligente.
+  - Suporte a **Proxy dedicado por conta** (`SOCKS5`, `SOCKS5h`, `SOCKS4`, `HTTP`, `HTTPS`) com verificador de IP de saída (`api.ipify.org`).
+  - Pausa automática (cooldown configurável) ao detectar login externo (`close code 4001`) e bloqueio automático em caso de sessão expirada/ban, evitando reconexões em loop.
+  - Renovação e persistência automática de tokens de sessão (`sessao.renovada`).
+- **Automação de Hunt, Captura e Loja:**
+  - Seleção de qualquer hunt/mapa do jogo (incluindo troca de nível/tier de **Outland 1 a 8**). Se a conta estiver em combate, a troca entra na fila e executa automaticamente assim que a trava (`centroLivreEm`) termina.
+  - Captura automática de cadáveres (`ball.throw`) respeitando janela e cooldown do servidor.
+  - Reposição automática de **Poções** e **Balls** equipadas na loja NPC (`shop.buy`).
+  - Recomendador **"Melhor Hunt"** integrado ao motor de simulação em Web Worker isolado.
+- **Múltiplos Gateways de Notificação (Discord e/ou Telegram):**
+  - Envio de alertas em tempo real para **Discord** (Webhook), **Telegram** (Bot API em HTML) ou **ambos simultaneamente**, com chaves independentes para ativar/pausar cada gateway.
+  - Alertas de queda/retorno de conta, captura/encontro de **Shiny**, drop de **Itens Raros**, compras do Sniper, oportunidades de venda acima da média, anúncios vendidos e **Relatório Diário** consolidado.
+- **Mercado da Comunidade, Análise e Sniper:**
+  - Visão geral de preços mínimos e médias de 7 dias (Gold e Gemas), vitrine de Pokémon com filtros avançados, histórico global com busca por sugestões e extrato de compras/vendas.
+  - **Análise do Mercado (24h, 7d e 30d):** coleta contínua de vendas do servidor no SQLite local combinada ao histórico do `pokeidleguide.io` (com fallback automático), exibindo itens/Pokémons mais vendidos, mediana e quartis de preço, maiores altas/quedas, índice de inflação e horários de pico.
+  - **Sniper de Mercado** (desligado por padrão) com teto de preço fixo ou percentual abaixo da média, orçamento diário individual por conta, sincronização com o relógio do servidor e disputa simultânea no sorteio de liberação.
+  - **Carteira somente leitura:** consulta saldo e extrato de Gemas sem implementar comandos de saque (`orbs.sacar`) ou transferência de Coins (`banco.coins`).
+- **Dashboard Personalizável, PVP Ranqueado, Passe, Chat e Ficha Completa:**
+  - **Medidores de XP e Modelos de Card:** progresso em tempo real e estimativa de tempo para subir de nível tanto do treinador quanto do Pokémon equipado, com 4 estilos visuais em Configurações (*Padrão*, *Medalhão*, *Versus* e *Corrida*) e troca instantânea do idioma dos itens (*PT*, *EN*, *ES*).
+  - **PVP Ranqueado:** fila automática para qualquer conta, histórico de partidas da sessão, editor visual de equipe com tabuleiro de posicionamento, ranking Top 1.000 e Top PVP Mensal.
+  - **Ficha e Calculadora de Pokémon:** inspeção completa de IVs, stats, evolução, nota de nascença (0 a 10), projeção na evolução final e poder PVE/PVP (para Pokémons próprios, do mercado ou compartilhados no chat).
+  - **Passe de Batalha:** visualização da trilha de 30 dias e resgate diário com um clique.
+  - **Chat em Tempo Real:** leitura unificada e envio de mensagens nos canais públicos (*Mundo*, *Comércio*, *Dúvidas*) com modo janela flutuante (*Picture-in-Picture*).
 
-- Python 3.12+ (em Debian/Ubuntu, instale também `python3-venv`: `sudo apt install python3-venv`)
-- Node 18+ (apenas para compilar o dashboard)
-- Suas próprias contas do jogo
+---
 
-## Instalação
+## Deploy no Dokploy (Domínio HTTPS + Secret de Proteção)
 
-**Windows, sem complicação:** baixe o `PokeIdleManager-Setup.exe` na
-[página de Releases](https://github.com/DiuleJR/pokeidle-manager-online/releases/latest). Ele já traz tudo, entra
-na conta pela janela do jogo e se atualiza sozinho. Detalhes em [INSTALACAO.md](INSTALACAO.md#jeito-mais-fácil-app-do-windows).
+O projeto já vem pré-configurado para rodar em container no **Dokploy**, exposto por um domínio **HTTPS** (via Traefik + Let's Encrypt) e protegido por um **Secret (`TELEMETRY_TOKEN`)** desde o primeiro boot.
 
-Guia completo, passo a passo (Windows, Linux/macOS, Android/Termux e VPS), com solução dos problemas
-comuns: **[INSTALACAO.md](INSTALACAO.md)**.
+Veja o guia detalhado em **[`dokploy/README.md`](dokploy/README.md)**.
 
-Resumo rápido (precisa de Git, Python 3.12+ e, no Debian/Ubuntu, `python3-venv`; o Node 18+ é
-opcional):
+### Como funciona a proteção por Secret (`TELEMETRY_TOKEN`)
 
-```bash
-git clone https://github.com/DiuleJR/pokeidle-manager-online.git pokeidle
-cd pokeidle
-./iniciar.sh          # Windows: dois cliques em iniciar.bat
-```
+Quando `TELEMETRY_TOKEN` é definido nas variáveis de ambiente:
+1. O painel **desativa o modo de setup aberto** — ninguém consegue acessar o seu domínio público para cadastrar uma senha antes de você.
+2. O próprio `TELEMETRY_TOKEN` funciona como **senha de login** no navegador e como token `Authorization: Bearer` para automações/API.
+3. Após entrar no painel com o secret, você também pode definir uma senha própria em **Configurações → Segurança**.
 
-O script cria o ambiente, instala as dependências, compila o dashboard e inicia o bot.
-Na **primeira vez**, abra `http://localhost:8080` e **crie uma senha** para o painel. Depois vá em
-**Configurações → Adicionar conta**. Para atualizar depois:
-`./iniciar.sh atualizar` (Windows: `.\iniciar.bat atualizar`). O painel também avisa sozinho quando sai
-versão nova (verifica a cada hora e no botão **Configurações → Verificar atualização**) e atualiza com
-um clique, veja [Atualização pelo painel](INSTALACAO.md#atualização-pelo-painel).
+### Passo a passo rápido no Dokploy (Modo Compose)
 
-## Adicionando uma conta
+1. Crie um serviço **Compose** no Dokploy conectado a este repositório e defina o **Compose Path** como:
+   ```text
+   docker-compose.dokploy.yml
+   ```
+2. Na aba **Environment**, defina:
+   ```env
+   TELEMETRY_TOKEN=coloque-aqui-um-secret-forte-de-32-caracteres
+   PUBLIC_URL=https://pokeidle.seudominio.com
+   REPORT_TZ=America/Sao_Paulo
+   DAILY_REPORT_HOUR=0
 
-O jogo guarda a sessão no navegador. O painel precisa de três dados: **nick**,
-**token** e **ID do dispositivo**. Você os copia do jogo em um clique:
+   # Gateways de notificação (opcionais — também configuráveis pelo painel web):
+   DISCORD_WEBHOOK_URL=
+   TELEGRAM_BOT_TOKEN=
+   TELEGRAM_CHAT_ID=
+   ```
+3. Na aba **Domains**, adicione o seu domínio apontando para o serviço `pokeidle` na porta **`8080`** com **HTTPS (Let's Encrypt)** ativado.
+4. Clique em **Deploy**. Todos os dados (banco SQLite `app.db`, sessões e estatísticas diárias) ficam persistidos no volume `/data`.
 
-1. No painel: **Configurações → Adicionar conta**.
-2. Arraste o botão **"Copiar conta Pokeidle"** para a barra de favoritos do navegador
-   (no computador). Ele é só um favorito com um pequeno código: roda na página do
-   jogo, lê a sessão salva ali e copia os dados para a área de transferência. Nada
-   é enviado a lugar nenhum; o código é visível no próprio painel.
-3. Abra **pokeidle.io/app**, entre na conta e clique no favorito.
-4. Volte ao painel, cole no campo e clique em **Testar e salvar**.
+> Também está disponível o template automático do Dokploy em [`dokploy/template.toml`](dokploy/template.toml) + [`dokploy/docker-compose.yml`](dokploy/docker-compose.yml), que gera o `TELEMETRY_TOKEN` automaticamente (`${password:32}`) e provisiona o domínio HTTPS.
 
-O painel conecta de verdade para validar e mostra o nick e o nível. Se o navegador
-bloquear o favorito, use a aba **Console (F12)**: é uma linha para colar no console
-do jogo. Há também a aba **Manual**.
+---
 
-> **Importante:** depois de adicionar, **feche a aba do jogo sem clicar em "Sair"**.
-> Duas conexões da mesma conta se derrubam (login externo) e o bot entra em cooldown.
-
-A sessão do jogo dura cerca de 30 dias; o bot guarda o token renovado sozinho. Se o
-jogo deixar de aceitar o token, a conta aparece como **"Ação necessária"** e é só
-reimportar em **Editar**.
-
-### Proxy
-
-Em **Adicionar conta** (ou **Editar**) marque "Usar proxy" e informe tipo, host,
-porta e credenciais. O botão **Testar proxy** mostra o IP de saída. Sem proxy, a
-conta conecta pelo IP da máquina. Confirme que o plano do proxy aceita várias
-conexões simultâneas se várias contas usarem o mesmo.
-
-## Acessando o painel numa VPS
-
-O painel guarda tokens das suas contas, então proteja o acesso:
-
-- **Túnel SSH (mais simples, nada a configurar no servidor):**
-  `ssh -L 8080:localhost:8080 usuario@seu-servidor` e abra `http://localhost:8080`.
-- **HTTPS com proxy reverso** (Caddy/nginx) se quiser acessar de qualquer lugar.
-  Em HTTP puro fora do localhost a senha trafega sem criptografia (o painel avisa).
-
-Por padrão o painel escuta só em `127.0.0.1`. Se mudar `TELEMETRY_HOST` para expor, o login
-passa a ser exigido em tudo, e criar a senha de fora do computador do bot exige o **código de
-configuração** mostrado no console (`journalctl -u pokeidle` na VPS).
-
-### Rodando como serviço (systemd)
-
-Veja [`deploy/pokeidle.service`](deploy/pokeidle.service). O `deploy.sh` é um exemplo
-de atualização (git pull + build + restart) e exige `VPS=usuario@host`:
+## Rodando com Docker Compose (Local ou VPS)
 
 ```bash
-VPS=usuario@meu-servidor VPS_KEY=~/.ssh/minha_chave ./deploy.sh "mensagem"
-```
-
-### Docker (opcional)
-
-```bash
+cp .env.example .env
+# Edite o .env e defina TELEMETRY_TOKEN (e PUBLIC_URL se usar proxy reverso HTTPS)
 docker compose up -d --build
-docker compose logs        # código de configuração, se for criar a senha de fora
 ```
 
-Os dados ficam em `./data` (monte como volume). Nunca faça commit dessa pasta.
+- Por padrão, [`docker-compose.yml`](docker-compose.yml) faz bind apenas em `127.0.0.1:8080:8080` (para uso com túnel SSH ou proxy reverso local). Para expor em todas as interfaces, defina `BIND_HOST=0.0.0.0`.
+- Os dados ficam salvos no volume `pokeidle-data` montado em `/data`.
 
-## Migrando do `.env` antigo
+---
 
-Se você já tinha `ACC1_NICK`, `ACC1_TOKEN`, `ACC1_DEVICE_ID`, `ACC1_PROXY_*` etc., deixe
-essas variáveis no `.env` e inicie: na primeira execução (banco vazio) elas são
-importadas, junto com `WS_URL`, `DISCORD_WEBHOOK_URL`, `DAILY_REPORT_HOUR`,
-`REPORT_TZ` e `PUBLIC_URL`. Depois disso o painel manda; você pode apagar essas
-linhas do `.env`.
+## Instalação Local (Sem Docker)
 
-## Configurações do painel
+Guia passo a passo completo para Windows, Linux, macOS, systemd e Android/Termux em **[`INSTALACAO.md`](INSTALACAO.md)**.
 
-Em **Configurações → Geral**: webhook do Discord (com botão de teste), hora em que o
-dia vira e fuso do relatório, e a **URL pública** (opcional: só serve para mostrar o
-ícone dos itens raros no Discord; quem roda na rede local deixa vazio).
-
-## Mercado
-
-A aba **Mercado** consulta o mercado do jogo pelas contas que estão online (somente leitura) e permite comprar.
-
-- **Alertas:** avisam no Discord quando um item ou Pokémon aparece abaixo de um preço (ou X% abaixo da média).
-- **Sniper (compra automática):** o jogo permite automação no mercado, e o sorteio entre quem compra junto
-  mantém a disputa justa. Aqui ele nasce **desligado**: é preciso ligar a chave geral e cada regra exige
-  preço máximo, conta e **orçamento diário** (o máximo que ela pode gastar por dia). Nunca compra de si mesmo.
-- **Gemas valem dinheiro real.** O bot só **lê** a carteira. Ele nunca saca Gemas nem envia Coins; depósito e
-  saque são feitos só dentro do jogo.
-- Perder o sorteio da liberação não custa nada.
-
-## Dados e segurança
-
-- Contas e tokens ficam em `data/app.db` (SQLite, permissão restrita). Faça backup
-  e **não publique** essa pasta.
-- A API nunca devolve o token nem a senha de proxy (só os últimos caracteres).
-- O painel pede uma senha, criada no primeiro acesso. Ela é guardada com hash (scrypt) e a sessão fica
-  num cookie HttpOnly; há limite de tentativas erradas. Esqueceu a senha? Rode
-  `python main.py --reset-password` no computador do bot e crie outra.
-
-## Apoie o projeto
-
-O projeto é gratuito e open source. Se ele te ajudou e você quiser retribuir, qualquer valor
-ajuda a manter o desenvolvimento. Não é obrigatório e não libera nenhum recurso extra.
-
-**Pix** (copia e cola, ou aponte a câmera do banco para o QR):
-
-<img src="assets/pix-qr.png" alt="QR Code do Pix" width="200">
-
-```text
-00020126580014br.gov.bcb.pix0136d786a417-fce5-4167-9b5f-23614c67b6b25204000053039865802BR5912Diule Junior6009Sao Paulo62230519daqr7556502974044716304D7EB
+```bash
+git clone https://github.com/adryansf/pokeidle-manager-online.git pokeidle
+cd pokeidle
+./iniciar.sh          # No Windows: dê dois cliques em iniciar.bat
 ```
 
-**USDT (somente rede Solana)** — o mesmo tipo de saque do jogo:
+O script cria o ambiente virtual Python (3.12+), instala as dependências, compila o dashboard React e inicia o servidor em `http://localhost:8080`.
 
-```text
-EEJYeV16B3Znwy31s66iYzRg6PninPDyLP9eQWnEDa8u
-```
+---
 
-> Envie apenas USDT pela rede **Solana**. Tokens de outras redes enviados para esse
-> endereço podem ser perdidos.
+## Configurando Notificações (Discord e/ou Telegram)
 
-Outra forma de ajudar: deixar uma estrela no repositório, relatar bugs e compartilhar com quem joga.
+No painel, acesse **Configurações → Geral**:
+
+- **Gateway: Discord**
+  - Cole a URL do Webhook do seu canal (`https://discord.com/api/webhooks/...`) e clique em **Salvar**.
+  - Use a caixa de seleção para ativar/pausar os envios e o botão **Enviar teste** para validar.
+- **Gateway: Telegram**
+  - Crie um bot no Telegram conversando com o [`@BotFather`](https://t.me/BotFather) (`/newbot`) e copie o **Token do Bot** (`123456789:ABCdef...`).
+  - Obtenha o **Chat ID** da sua conta pessoal, grupo ou canal (ex.: `123456789`, `-1001234567890` ou `@meucanal`).
+  - Salve no painel e clique em **Enviar teste**.
+- Você pode deixar **apenas o Discord**, **apenas o Telegram** ou **os dois ativos ao mesmo tempo**.
+
+---
+
+## Segurança e Arquitetura
+
+- **Autenticação e Sessão:** Senha com hash `scrypt` + sal aleatório; sessões armazenadas apenas como hash `SHA-256` no banco e entregues em cookie `HttpOnly`, `SameSite=Strict` e `Secure` (automático sob HTTPS / `X-Forwarded-Proto: https`).
+- **Secret de Proteção (`TELEMETRY_TOKEN`):** Elimina a janela de setup inicial em deploys públicos e permite autenticação via header `Authorization: Bearer` com comparação em tempo constante (`hmac.compare_digest`).
+- **Rate-Limit Consciente de Proxy (`TRUST_PROXY=1`):** Limite de 10 falhas por minuto por IP real do cliente (lendo `X-Forwarded-For` apenas quando a conexão vem de loopback ou da rede privada do proxy Docker/Traefik).
+- **Proteção contra Vazamento de Tokens:**
+  - Tokens de contas, senhas de proxy e token do bot do Telegram jamais retornam pela API (apenas dicas mascaradas como `…3456`).
+  - A URL do servidor WebSocket (`ws_url`) é validada contra uma *allowlist* oficial (`wss://pokeidle.io`), impedindo que alterações pela API redirecionem o handshake `hello` para servidores externos.
+- **Proteção CSRF, CSWSH e Isolamento de Worker:**
+  - Validação estrita do cabeçalho `Origin` (compatível com `X-Forwarded-Host`) em todas as rotas HTTP mutáveis (`POST`, `PUT`, `PATCH`, `DELETE`) e conexões WebSocket (`/ws/telemetry`, `/ws/chat`).
+  - O Web Worker da calculadora de hunt (`hunt-worker.js`) roda sob Content-Security-Policy restrita com `sandbox allow-scripts` e sem acesso a `caches` ou `indexedDB`.
+
+---
 
 ## Licença
 
-[GNU AGPL-3.0](LICENSE). Se você rodar uma versão modificada como serviço de rede,
-precisa disponibilizar o código-fonte das modificações aos usuários.
+Distribuído sob a licença [GNU AGPL-3.0](LICENSE).

@@ -1,15 +1,41 @@
-# Opcional. Uso: docker compose up -d --build
-# Abra http://localhost:8080 e crie a senha. Se for criar de fora, o código de configuração
-# aparece em: docker compose logs
+# Uso com Dokploy ou Docker Compose local:
+#   1) Defina TELEMETRY_TOKEN (chave/senha secreta de proteção do painel) e PUBLIC_URL (seu domínio HTTPS).
+#   2) Suba com: docker compose up -d --build
 services:
   pokeidle:
     build: .
     restart: unless-stopped
+    expose:
+      - "8080"
     ports:
-      # Só local. Para acessar de fora, prefira túnel SSH ou HTTPS (veja o README).
-      - "127.0.0.1:8080:8080"
+      # Para acesso local ou mapeamento direto; no Dokploy o proxy reverso (Traefik) roteia o domínio HTTPS para a porta 8080 interna.
+      - "${BIND_HOST:-127.0.0.1}:${TELEMETRY_PORT:-8080}:8080"
     volumes:
-      - ./data:/data
+      - pokeidle-data:/data
     environment:
-      # TELEMETRY_TOKEN: opcional; chave de acesso para scripts (também vale como senha)
-      TELEMETRY_TOKEN: ${TELEMETRY_TOKEN:-}
+      DATA_DIR: /data
+      DAILY_FILE: /data/daily_state.json
+      SESSION_FILE: /data/session_state.json
+      TELEMETRY_HOST: 0.0.0.0
+      TELEMETRY_PORT: "8080"
+      TRUST_PROXY: "1"
+      UPDATE_CHECK: "${UPDATE_CHECK:-0}"
+      # Obrigatório em produção/domínio público: protege o painel desde o 1º boot (vale como senha e Bearer token).
+      TELEMETRY_TOKEN: "${TELEMETRY_TOKEN:-}"
+      # URL pública HTTPS do painel (ex.: https://pokeidle.seudominio.com)
+      PUBLIC_URL: "${PUBLIC_URL:-}"
+      # Gateways de notificação opcionais (também configuráveis direto pelo painel em Configurações -> Geral):
+      DISCORD_WEBHOOK_URL: "${DISCORD_WEBHOOK_URL:-}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID:-}"
+      REPORT_TZ: "${REPORT_TZ:-America/Sao_Paulo}"
+      DAILY_REPORT_HOUR: "${DAILY_REPORT_HOUR:-0}"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  pokeidle-data:

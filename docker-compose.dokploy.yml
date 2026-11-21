@@ -1,0 +1,40 @@
+# Docker Compose otimizado para o Dokploy (modo Compose ou Template).
+# O Traefik do Dokploy gerencia o domínio HTTPS e roteia para a porta 8080 deste serviço.
+# O TELEMETRY_TOKEN é obrigatório (:?) para garantir que o painel nunca suba aberto na internet.
+services:
+  pokeidle:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8080"
+    volumes:
+      - pokeidle-data:/data
+    environment:
+      DATA_DIR: /data
+      DAILY_FILE: /data/daily_state.json
+      SESSION_FILE: /data/session_state.json
+      TELEMETRY_HOST: 0.0.0.0
+      TELEMETRY_PORT: "8080"
+      TRUST_PROXY: "1"
+      UPDATE_CHECK: "0"
+      # Secret obrigatório de proteção do painel (bloqueia o setup público e exige login imediato):
+      TELEMETRY_TOKEN: "${TELEMETRY_TOKEN:?Defina o secret TELEMETRY_TOKEN nas variaveis de ambiente do Dokploy}"
+      # Domínio público HTTPS configurado no Dokploy (ex.: https://pokeidle.seudominio.com):
+      PUBLIC_URL: "${PUBLIC_URL:-}"
+      # Gateways de notificação opcionais (Discord e/ou Telegram — também editáveis na UI do painel):
+      DISCORD_WEBHOOK_URL: "${DISCORD_WEBHOOK_URL:-}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID:-}"
+      REPORT_TZ: "${REPORT_TZ:-America/Sao_Paulo}"
+      DAILY_REPORT_HOUR: "${DAILY_REPORT_HOUR:-0}"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  pokeidle-data:

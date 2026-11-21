@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 import config
 import login_window
-from auth import Auth
+from auth import _FORWARD_HEADERS, Auth
 from config import ProxyConfig, build_account_config
 from connection import State, probe_account, probe_exit_ip
 from notify import BLUE
@@ -29,6 +29,8 @@ if TYPE_CHECKING:
     from manager import AccountManager
 
 DISCORD_WEBHOOK_RE = re.compile(r"^https://(?:canary\.|ptb\.)?(?:discord|discordapp)\.com/api/webhooks/\d+/[\w-]+/?$")
+TELEGRAM_TOKEN_RE = re.compile(r"^\d{5,16}:[A-Za-z0-9_-]{20,64}$")
+TELEGRAM_CHAT_ID_RE = re.compile(r"^(?:-?\d{5,20}|@[A-Za-z0-9_]{5,64})$")
 TOKEN_RE = re.compile(r"^\S{10,4096}$")
 LOGIN_TTL_S = 600          # tempo para concluir o cadastro depois do login na janela
 LOOPBACK_CLIENTS = ("127.0.0.1", "::1", "localhost")
@@ -93,6 +95,10 @@ class ProxyTestIn(BaseModel):
 class SettingsIn(BaseModel):
     ws_url: str | None = Field(None, max_length=300)
     discord_webhook: str | None = Field(None, max_length=300)  # None = manter; "" = limpar
+    discord_enabled: bool | None = None
+    telegram_bot_token: str | None = Field(None, max_length=200)  # None = manter; "" = limpar
+    telegram_chat_id: str | None = Field(None, max_length=64)     # None = manter; "" = limpar
+    telegram_enabled: bool | None = None
     report_hour: int | None = Field(None, ge=0, le=23)
     report_tz: str | None = Field(None, max_length=64)
     public_url: str | None = Field(None, max_length=300)
@@ -210,7 +216,9 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
     login_lock = asyncio.Lock()
 
     def _is_local(request: Request) -> bool:
-        return bool(request.client) and request.client.host in LOOPBACK_CLIENTS
+        return (bool(request.client) and request.client.host in LOOPBACK_CLIENTS
+                and (not auth.exposed or auth.desktop)
+                and not any(h in request.headers for h in _FORWARD_HEADERS))
 
     @app.get("/api/login-window")
     async def login_window_status(request: Request, tok: str | None = Query(None, alias="token")):
@@ -380,11 +388,29 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
     def _settings_public() -> dict:
         s = store.all_settings()
         hook = s.pop("discord_webhook")
-        return {**s, "report_hour": int(s["report_hour"] or 0), "hasWebhook": bool(hook),
-                "alert_sell": s["alert_sell"] == "1", "alert_sold": s["alert_sold"] == "1",
-                "alert_sell_pct": int(s["alert_sell_pct"] or 30),
-                "external_login_wait_min": int(s["external_login_wait_min"] or 5),
-                "webhookHint": mask(hook, 6), "defaultWsUrl": config.DEFAULT_WS_URL}
+        tg_tok = s.pop("telegram_bot_token")
+        tg_chat = s.get("telegram_chat_id", "")
+        discord_on = s["discord_enabled"] != "0"
+        telegram_on = s["telegram_enabled"] != "0"
+        has_webhook = bool(hook)
+        has_telegram = bool(tg_tok and tg_chat)
+        return {
+            **s,
+            "report_hour": int(s["report_hour"] or 0),
+            "hasWebhook": has_webhook,
+            "discord_enabled": discord_on,
+            "webhookHint": mask(hook, 6),
+            "hasTelegram": has_telegram,
+            "telegram_enabled": telegram_on,
+            "telegramTokenHint": mask(tg_tok, 4),
+            "telegram_chat_id": tg_chat,
+            "hasNotifier": (has_webhook and discord_on) or (has_telegram and telegram_on),
+            "alert_sell": s["alert_sell"] == "1",
+            "alert_sold": s["alert_sold"] == "1",
+            "alert_sell_pct": int(s["alert_sell_pct"] or 30),
+            "external_login_wait_min": int(s["external_login_wait_min"] or 5),
+            "defaultWsUrl": config.DEFAULT_WS_URL,
+        }
 
     @app.get("/api/settings")
     async def get_settings(request: Request, tok: str | None = Query(None, alias="token")):
@@ -402,6 +428,12 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
             if not v.startswith(("ws://", "wss://")):
                 return JSONResponse({"error": "A URL do WebSocket deve começar com ws:// ou wss://"},
                                     status_code=400)
+            if not config.is_allowed_ws_url(v):
+                return JSONResponse(
+                    {"error": "Servidor WebSocket não permitido por segurança (evita vazamento de tokens). "
+                              "Use wss://pokeidle.io ou defina WS_URL no ambiente do servidor."},
+                    status_code=400,
+                )
             store.set_setting("ws_url", v)
         if "discord_webhook" in sent and body.discord_webhook is not None:
             v = body.discord_webhook.strip()
@@ -409,6 +441,23 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
                 return JSONResponse({"error": "O webhook deve ser uma URL do Discord "
                                               "(https://discord.com/api/webhooks/...)."}, status_code=400)
             store.set_setting("discord_webhook", v)
+        if "discord_enabled" in sent and body.discord_enabled is not None:
+            store.set_setting("discord_enabled", "1" if body.discord_enabled else "0")
+        if "telegram_bot_token" in sent and body.telegram_bot_token is not None:
+            v = body.telegram_bot_token.strip()
+            if v and not TELEGRAM_TOKEN_RE.match(v):
+                return JSONResponse({"error": "O token do bot do Telegram é inválido "
+                                              "(formato esperado: 123456789:ABCdef...)."}, status_code=400)
+            store.set_setting("telegram_bot_token", v)
+        if "telegram_chat_id" in sent and body.telegram_chat_id is not None:
+            v = body.telegram_chat_id.strip()
+            if v and not TELEGRAM_CHAT_ID_RE.match(v):
+                return JSONResponse({"error": "O Chat ID do Telegram é inválido "
+                                              "(use o ID numérico, ex.: 123456789 ou -100123456789, ou @canal)."},
+                                    status_code=400)
+            store.set_setting("telegram_chat_id", v)
+        if "telegram_enabled" in sent and body.telegram_enabled is not None:
+            store.set_setting("telegram_enabled", "1" if body.telegram_enabled else "0")
         if "report_hour" in sent and body.report_hour is not None:
             store.set_setting("report_hour", str(body.report_hour))
         if "report_tz" in sent and body.report_tz is not None:
@@ -437,10 +486,27 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
         return _settings_public()
 
     @app.post("/api/settings/test-webhook")
-    async def test_webhook(request: Request, tok: str | None = Query(None, alias="token")):
+    async def test_webhook(
+        request: Request,
+        tok: str | None = Query(None, alias="token"),
+        gateway: str | None = Query(None),
+    ):
         if (r := guard(request, tok)):
             return r
+        gw = (gateway or "all").strip().lower()
+        if gw == "discord":
+            if not manager.notifier.discord_configured:
+                return JSONResponse({"error": "Nenhum webhook do Discord configurado."}, status_code=400)
+            manager.notifier.send("Teste do painel", "Webhook do Discord configurado com sucesso. ✅", BLUE,
+                                  targets={"discord"})
+            return {"ok": True, "gateway": "discord"}
+        if gw == "telegram":
+            if not manager.notifier.telegram_configured:
+                return JSONResponse({"error": "Bot do Telegram ou Chat ID não configurado."}, status_code=400)
+            manager.notifier.send("Teste do painel", "Gateway do Telegram configurado com sucesso. ✅", BLUE,
+                                  targets={"telegram"})
+            return {"ok": True, "gateway": "telegram"}
         if not manager.notifier.enabled:
-            return JSONResponse({"error": "Nenhum webhook configurado."}, status_code=400)
-        manager.notifier.send("Teste do painel", "Webhook configurado com sucesso. ✅", BLUE)
-        return {"ok": True}
+            return JSONResponse({"error": "Nenhum gateway de notificação (Discord ou Telegram) ativo."}, status_code=400)
+        manager.notifier.send("Teste do painel", "Notificações configuradas com sucesso. ✅", BLUE)
+        return {"ok": True, "gateway": "all"}

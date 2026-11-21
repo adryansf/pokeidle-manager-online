@@ -1,0 +1,25 @@
+# Template oficial do Dokploy para o PokeIdle Manager Online
+# Gera automaticamente um secret forte de 32 caracteres (TELEMETRY_TOKEN) e configura o domínio HTTPS na porta 8080.
+
+[variables]
+main_domain = "${domain}"
+telemetry_token = "${password:32}"
+
+[config]
+[[config.domains]]
+serviceName = "pokeidle"
+port = 8080
+host = "${main_domain}"
+https = true
+certificateType = "letsencrypt"
+
+[config.env]
+TELEMETRY_TOKEN = "${telemetry_token}"
+PUBLIC_URL = "https://${main_domain}"
+REPORT_TZ = "America/Sao_Paulo"
+DAILY_REPORT_HOUR = "0"
+DISCORD_WEBHOOK_URL = ""
+TELEGRAM_BOT_TOKEN = ""
+TELEGRAM_CHAT_ID = ""
+
+mounts = []

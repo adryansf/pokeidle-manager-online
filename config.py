@@ -23,6 +23,25 @@ from dotenv import load_dotenv
 
 MAX_ACCOUNTS = 4
 DEFAULT_WS_URL = "wss://pokeidle.io"
+ALLOWED_WS_HOSTS = frozenset({"pokeidle.io", "www.pokeidle.io"})
+
+
+def is_allowed_ws_url(url: str) -> bool:
+    """Valida se a URL do WebSocket aponta para um host oficial do jogo (ou o WS_URL definido no ambiente).
+    Impede que alguém autenticado no painel troque o ws_url via API para capturar os tokens no handshake hello."""
+    from urllib.parse import urlparse
+
+    u = urlparse((url or "").strip())
+    if u.scheme not in ("ws", "wss") or not u.hostname:
+        return False
+    host = u.hostname.lower()
+    env_ws = os.getenv("WS_URL", "").strip()
+    env_host = (urlparse(env_ws).hostname or "").lower() if env_ws and not env_ws.startswith("wss://CHANGE_ME") else ""
+    if env_host and host == env_host:
+        return True
+    if u.scheme != "wss":
+        return False
+    return host in ALLOWED_WS_HOSTS or host.endswith(".pokeidle.io")
 
 # Parâmetros de protocolo (spec: spec do protocolo + requisitos do usuário)
 WELCOME_TIMEOUT = 15      # s esperando 'welcome' após 'hello'

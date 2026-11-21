@@ -1,14 +1,16 @@
-"""Notificações para um webhook do Discord + estatísticas diárias.
+"""Notificações multi-gateway (Discord e/ou Telegram) + estatísticas diárias.
 
-Webhook, hora da virada do dia e fuso são configurados no painel (aba Configurações).
-As variáveis DISCORD_WEBHOOK_URL, DAILY_REPORT_HOUR e REPORT_TZ do .env só são lidas
-como padrão inicial (e importadas para o banco na 1ª execução).
+Webhook do Discord, Bot do Telegram (token + chat_id), hora da virada do dia e fuso são
+configurados no painel (aba Configurações). As variáveis DISCORD_WEBHOOK_URL, TELEGRAM_BOT_TOKEN,
+TELEGRAM_CHAT_ID, DAILY_REPORT_HOUR e REPORT_TZ do .env são lidas como padrão inicial (e
+importadas para o banco na 1ª execução).
 
-O envio é assíncrono por uma fila: nunca bloqueia o bot e respeita o rate limit (429).
+O envio é assíncrono por uma fila: nunca bloqueia o bot e respeita o rate limit (429) de cada gateway.
 """
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 import os
@@ -24,6 +26,7 @@ from session_stats import ITEM_LABELS
 log = logging.getLogger("notify")
 
 RED, GREEN, GOLD, BLUE = 0xE74C3C, 0x2ECC71, 0xF1C40F, 0x3498DB
+TELEGRAM_API_BASE = "https://api.telegram.org"
 
 # Base pública do dashboard (ex.: https://seu-dominio.exemplo), usada para
 # montar a URL do ícone (thumbnail) nos embeds — ex.: item raro obtido. Sem ela,
@@ -54,22 +57,107 @@ def fmt_duration(seconds: float) -> str:
     return f"{sec}s"
 
 
+def _md_to_tg_html(text: str) -> str:
+    """Escapa HTML e converte negrito Markdown (**texto**) em <b>texto</b> para o Telegram."""
+    escaped = html.escape(str(text or ""), quote=False)
+    return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
+
+
+def embed_to_telegram_html(embed: dict) -> str:
+    """Formata um embed padrão do bot em mensagem HTML limpa para o Telegram."""
+    lines: list[str] = []
+    title = str(embed.get("title") or "").strip()
+    desc = str(embed.get("description") or "").strip()
+    if title:
+        lines.append(f"<b>{html.escape(title, quote=False)}</b>")
+    if desc:
+        lines.append(_md_to_tg_html(desc))
+    fields = embed.get("fields") or []
+    if fields:
+        for f in fields:
+            name = html.escape(str(f.get("name") or ""), quote=False)
+            val = _md_to_tg_html(str(f.get("value") or ""))
+            if "\n" in val:
+                lines.append(f"\n<b>{name}</b>\n{val}")
+            else:
+                lines.append(f"• <b>{name}:</b> {val}")
+    return "\n".join(lines).strip()
+
+
 class Notifier:
-    def __init__(self, url: str | None = None) -> None:
-        self.url = (url if url is not None else os.getenv("DISCORD_WEBHOOK_URL", "")).strip()
+    def __init__(
+        self,
+        url: str | None = None,
+        *,
+        discord_enabled: bool = True,
+        telegram_token: str | None = None,
+        telegram_chat_id: str | None = None,
+        telegram_enabled: bool = True,
+    ) -> None:
+        use_env = url is None
+        self.url = (os.getenv("DISCORD_WEBHOOK_URL", "") if use_env else (url or "")).strip()
+        self.discord_enabled = bool(discord_enabled)
+        self.telegram_token = (
+            os.getenv("TELEGRAM_BOT_TOKEN", "") if (telegram_token is None and use_env) else (telegram_token or "")
+        ).strip()
+        self.telegram_chat_id = (
+            os.getenv("TELEGRAM_CHAT_ID", "") if (telegram_chat_id is None and use_env) else (telegram_chat_id or "")
+        ).strip()
+        self.telegram_enabled = bool(telegram_enabled)
         self._queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
+
+    @classmethod
+    def from_store(cls, store) -> "Notifier":
+        return cls(
+            store.get_setting("discord_webhook"),
+            discord_enabled=store.get_setting("discord_enabled") != "0",
+            telegram_token=store.get_setting("telegram_bot_token"),
+            telegram_chat_id=store.get_setting("telegram_chat_id"),
+            telegram_enabled=store.get_setting("telegram_enabled") != "0",
+        )
+
+    def apply_store(self, store) -> None:
+        self.url = store.get_setting("discord_webhook").strip()
+        self.discord_enabled = store.get_setting("discord_enabled") != "0"
+        self.telegram_token = store.get_setting("telegram_bot_token").strip()
+        self.telegram_chat_id = store.get_setting("telegram_chat_id").strip()
+        self.telegram_enabled = store.get_setting("telegram_enabled") != "0"
+
+    @property
+    def discord_configured(self) -> bool:
+        return bool(self.url)
+
+    @property
+    def discord_active(self) -> bool:
+        return bool(self.url and self.discord_enabled)
+
+    @property
+    def telegram_configured(self) -> bool:
+        return bool(self.telegram_token and self.telegram_chat_id)
+
+    @property
+    def telegram_active(self) -> bool:
+        return bool(self.telegram_token and self.telegram_chat_id and self.telegram_enabled)
 
     @property
     def enabled(self) -> bool:
-        return bool(self.url)
+        return self.discord_active or self.telegram_active
 
     def send(self, title: str, description: str = "", color: int = BLUE,
              fields: list[tuple[str, str, bool]] | None = None,
-             thumbnail: str | None = None) -> None:
-        """Enfileira um embed (sem await). Descarta se desligado ou fila cheia.
-        `thumbnail` (se dado) vira a imagem no canto superior direito do embed."""
-        if not self.enabled:
-            return
+             thumbnail: str | None = None,
+             *, targets: set[str] | None = None) -> None:
+        """Enfileira uma notificação (sem await). Descarta se desligado ou fila cheia.
+        `thumbnail` (se dado) vira a imagem no canto superior direito do embed do Discord.
+        `targets` (opcional) restringe o envio a {'discord'} ou {'telegram'} (ex.: botão de teste)."""
+        if targets is None:
+            if not self.enabled:
+                return
+        else:
+            if ("discord" in targets and not self.discord_configured) and (
+                "telegram" in targets and not self.telegram_configured
+            ):
+                return
         embed = {
             "title": title,
             "description": description,
@@ -80,38 +168,89 @@ class Notifier:
             embed["fields"] = [{"name": n, "value": v, "inline": i} for n, v, i in fields]
         if thumbnail:
             embed["thumbnail"] = {"url": thumbnail}
+        item: dict = {"embeds": [embed]}  # sem "username": vale o nome/avatar que o usuário configurou no Discord
+        if targets is not None:
+            item["_targets"] = list(targets)
         try:
-            self._queue.put_nowait({"embeds": [embed]})   # sem "username": vale o nome/avatar que o usuário configurou no Discord
+            self._queue.put_nowait(item)
         except asyncio.QueueFull:
             log.warning("fila de notificações cheia; mensagem descartada")
 
+    async def _post_discord(self, session: aiohttp.ClientSession, embeds: list[dict]) -> None:
+        if not self.url:
+            return
+        payload = {"embeds": embeds}
+        for attempt in range(4):
+            try:
+                async with session.post(self.url, json=payload) as r:
+                    if r.status == 429:
+                        retry = 1.0
+                        try:
+                            retry = float((await r.json()).get("retry_after", 1))
+                        except Exception:  # noqa: BLE001
+                            pass
+                        await asyncio.sleep(retry + 0.2)
+                        continue
+                    if r.status >= 400:
+                        log.warning("webhook Discord respondeu HTTP %s", r.status)
+                    break
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                log.warning("falha ao enviar webhook Discord (%s), tentativa %d", type(e).__name__, attempt + 1)
+                await asyncio.sleep(2 * (attempt + 1))
+
+    async def _post_telegram(self, session: aiohttp.ClientSession, embeds: list[dict]) -> None:
+        if not (self.telegram_token and self.telegram_chat_id and embeds):
+            return
+        text = embed_to_telegram_html(embeds[0])
+        if not text:
+            return
+        api_url = f"{TELEGRAM_API_BASE}/bot{self.telegram_token}/sendMessage"
+        payload = {
+            "chat_id": self.telegram_chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        for attempt in range(4):
+            try:
+                async with session.post(api_url, json=payload) as r:
+                    if r.status == 429:
+                        retry = 1.0
+                        try:
+                            body = await r.json()
+                            retry = float((body.get("parameters") or {}).get("retry_after") or body.get("retry_after", 1))
+                        except Exception:  # noqa: BLE001
+                            pass
+                        await asyncio.sleep(retry + 0.2)
+                        continue
+                    if r.status >= 400:
+                        log.warning("Telegram respondeu HTTP %s", r.status)
+                    break
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                log.warning("falha ao enviar Telegram (%s), tentativa %d", type(e).__name__, attempt + 1)
+                await asyncio.sleep(2 * (attempt + 1))
+
     async def run(self) -> None:
         """Worker: esvazia a fila para sempre (rodar em paralelo com o bot).
-        Fica de pé mesmo com o webhook vazio: ele pode ser definido depois, pelo painel."""
+        Fica de pé mesmo sem gateway configurado: eles podem ser definidos depois, pelo painel."""
         timeout = aiohttp.ClientTimeout(total=15)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             while True:
-                payload = await self._queue.get()
-                if not self.enabled:
-                    continue
-                for attempt in range(4):
-                    try:
-                        async with session.post(self.url, json=payload) as r:
-                            if r.status == 429:
-                                retry = 1.0
-                                try:
-                                    retry = float((await r.json()).get("retry_after", 1))
-                                except Exception:  # noqa: BLE001
-                                    pass
-                                await asyncio.sleep(retry + 0.2)
-                                continue
-                            if r.status >= 400:
-                                log.warning("webhook respondeu HTTP %s", r.status)
-                            break
-                    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                        log.warning("falha ao enviar webhook (%s), tentativa %d", type(e).__name__, attempt + 1)
-                        await asyncio.sleep(2 * (attempt + 1))
-                await asyncio.sleep(0.5)  # espaçamento entre mensagens
+                item = await self._queue.get()
+                embeds = item.get("embeds") or []
+                targets = set(item["_targets"]) if "_targets" in item else None
+                tasks = []
+                if (targets is not None and "discord" in targets and self.discord_configured) or (
+                    targets is None and self.discord_active
+                ):
+                    tasks.append(self._post_discord(session, embeds))
+                if (targets is not None and "telegram" in targets and self.telegram_configured) or (
+                    targets is None and self.telegram_active
+                ):
+                    tasks.append(self._post_telegram(session, embeds))
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    await asyncio.sleep(0.5)  # espaçamento entre mensagens
 
 
 class DailyStats:

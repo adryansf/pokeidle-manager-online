@@ -135,9 +135,9 @@ class AccountManager:
         return True
 
     async def apply_global_settings(self) -> None:
-        """Reaplica webhook/fuso/hora do relatório e reinicia as contas se o WS_URL mudou."""
+        """Reaplica gateways (Discord/Telegram), fuso/hora do relatório e reinicia as contas se o WS_URL mudou."""
         import notify
-        self.notifier.url = self.store.get_setting("discord_webhook").strip()
+        self.notifier.apply_store(self.store)
         self.daily.set_schedule(int(self.store.get_setting("report_hour") or 0),
                                 self.store.get_setting("report_tz"))
         notify.set_public_url(self.store.get_setting("public_url"))

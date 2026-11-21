@@ -718,8 +718,9 @@ function GlobalForm() {
   const [s, setS] = useState<GlobalSettings | null>(null);
   const [form, setForm] = useState({ ws_url: "", report_hour: 0, report_tz: "", public_url: "" });
   const [wait, setWait] = useState("5"); // minutos de espera após login em outro lugar (texto: dá para apagar e digitar)
-  const [hook, setHook] = useState<string | null>(null); // null = não está editando o webhook
-  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [hook, setHook] = useState<string | null>(null); // null = não está editando o webhook do Discord
+  const [tgForm, setTgForm] = useState<{ token: string; chatId: string } | null>(null); // null = não está editando o Telegram
+  const [confirmRemove, setConfirmRemove] = useState<"discord" | "telegram" | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -754,10 +755,26 @@ function GlobalForm() {
 
   const dirty =
     form.ws_url !== s.ws_url || form.report_hour !== s.report_hour || form.report_tz !== s.report_tz || form.public_url !== s.public_url;
+  const discordActive = s.hasWebhook && s.discord_enabled;
+  const telegramActive = s.hasTelegram && s.telegram_enabled;
+  const notifierActive = s.hasNotifier ?? (discordActive || telegramActive);
 
   return (
     <div className="space-y-5">
-      <Group title="Discord" badge={<Chip on={s.hasWebhook} label={s.hasWebhook ? "Ativo" : "Desligado"} />}>
+      <Group
+        title="Gateway: Discord"
+        badge={<Chip on={discordActive} label={s.hasWebhook ? (s.discord_enabled ? "Ativo" : "Pausado") : "Desligado"} />}
+      >
+        {s.hasWebhook && (
+          <Check2
+            checked={s.discord_enabled}
+            onChange={(v) =>
+              run(async () => fill(await admin.saveSettings({ discord_enabled: v })), v ? "Discord ativado." : "Discord pausado.")
+            }
+          >
+            Enviar notificações para o Discord {s.webhookHint && <span className="text-xs text-mute">({s.webhookHint})</span>}
+          </Check2>
+        )}
         {hook === null ? (
           <div className="flex flex-wrap gap-1.5">
             <button className="btn" onClick={() => setHook("")}>
@@ -765,10 +782,14 @@ function GlobalForm() {
             </button>
             {s.hasWebhook && (
               <>
-                <button className="btn" disabled={busy} onClick={() => run(() => admin.testWebhook().then(() => undefined), "Mensagem de teste enviada ao Discord.")}>
+                <button
+                  className="btn"
+                  disabled={busy}
+                  onClick={() => run(() => admin.testWebhook("discord").then(() => undefined), "Mensagem de teste enviada ao Discord.")}
+                >
                   Enviar teste
                 </button>
-                <button className="btn" onClick={() => setConfirmRemove(true)}>
+                <button className="btn" onClick={() => setConfirmRemove("discord")}>
                   Remover
                 </button>
               </>
@@ -791,9 +812,9 @@ function GlobalForm() {
                 disabled={busy || !hook.trim()}
                 onClick={() =>
                   run(async () => {
-                    fill(await admin.saveSettings({ discord_webhook: hook.trim() }));
+                    fill(await admin.saveSettings({ discord_webhook: hook.trim(), discord_enabled: true }));
                     setHook(null);
-                  }, "Webhook salvo.")
+                  }, "Webhook do Discord salvo.")
                 }
               >
                 Salvar
@@ -804,10 +825,108 @@ function GlobalForm() {
             </div>
           </div>
         )}
-        <p className="text-xs text-mute">Avisa quando uma conta cai ou volta, quando cai item raro e envia o relatório do dia.</p>
       </Group>
 
-      <Group title="Avisos do Mercado" badge={<Chip on={s.hasWebhook && (s.alert_sell || s.alert_sold)} label={s.hasWebhook ? (s.alert_sell || s.alert_sold ? "Ativo" : "Desligado") : "Precisa do webhook"} />}>
+      <Group
+        title="Gateway: Telegram"
+        badge={<Chip on={telegramActive} label={s.hasTelegram ? (s.telegram_enabled ? "Ativo" : "Pausado") : "Desligado"} />}
+      >
+        {s.hasTelegram && (
+          <Check2
+            checked={s.telegram_enabled}
+            onChange={(v) =>
+              run(async () => fill(await admin.saveSettings({ telegram_enabled: v })), v ? "Telegram ativado." : "Telegram pausado.")
+            }
+          >
+            Enviar notificações para o Telegram{" "}
+            <span className="text-xs text-mute">
+              (Chat: {s.telegram_chat_id} · Bot: {s.telegramTokenHint})
+            </span>
+          </Check2>
+        )}
+        {tgForm === null ? (
+          <div className="flex flex-wrap gap-1.5">
+            <button className="btn" onClick={() => setTgForm({ token: "", chatId: s.telegram_chat_id || "" })}>
+              {s.hasTelegram ? "Trocar Bot / Chat ID" : "Configurar Telegram"}
+            </button>
+            {s.hasTelegram && (
+              <>
+                <button
+                  className="btn"
+                  disabled={busy}
+                  onClick={() => run(() => admin.testWebhook("telegram").then(() => undefined), "Mensagem de teste enviada ao Telegram.")}
+                >
+                  Enviar teste
+                </button>
+                <button className="btn" onClick={() => setConfirmRemove("telegram")}>
+                  Remover
+                </button>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-2.5 rounded-lg border border-line p-3">
+            <Labeled
+              label="Token do Bot (@BotFather)"
+              hint={s.hasTelegram ? `Atual: ${s.telegramTokenHint}. Deixe em branco para manter o token atual.` : "Ex.: 123456789:ABCdefGHIjklMNOpqrSTUvwxYZ"}
+            >
+              <input
+                className="field w-full"
+                type="password"
+                value={tgForm.token}
+                onChange={(e) => setTgForm({ ...tgForm, token: e.target.value })}
+                placeholder={s.hasTelegram ? "Manter token atual" : "123456789:ABCdef…"}
+                autoComplete="off"
+                autoFocus
+              />
+            </Labeled>
+            <Labeled label="Chat ID (usuário, grupo ou @canal)" hint="Ex.: 123456789, -1001234567890 ou @meucanal">
+              <input
+                className="field w-full"
+                value={tgForm.chatId}
+                onChange={(e) => setTgForm({ ...tgForm, chatId: e.target.value })}
+                placeholder="-1001234567890"
+                autoComplete="off"
+              />
+            </Labeled>
+            <div className="flex gap-1.5">
+              <button
+                className="btn border-0 bg-poke-gold font-bold text-void hover:bg-[#f6ca5e]"
+                disabled={busy || !tgForm.chatId.trim() || (!s.hasTelegram && !tgForm.token.trim())}
+                onClick={() =>
+                  run(async () => {
+                    const payload: Record<string, unknown> = {
+                      telegram_chat_id: tgForm.chatId.trim(),
+                      telegram_enabled: true,
+                    };
+                    if (tgForm.token.trim()) payload.telegram_bot_token = tgForm.token.trim();
+                    fill(await admin.saveSettings(payload));
+                    setTgForm(null);
+                  }, "Configuração do Telegram salva.")
+                }
+              >
+                Salvar
+              </button>
+              <button className="btn" onClick={() => setTgForm(null)}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+        <p className="text-xs text-mute">
+          Você pode ativar o Discord, o Telegram ou os dois ao mesmo tempo. Avisa quedas/retornos, shinies, itens raros, sniper e o relatório diário.
+        </p>
+      </Group>
+
+      <Group
+        title="Avisos do Mercado"
+        badge={
+          <Chip
+            on={notifierActive && (s.alert_sell || s.alert_sold)}
+            label={notifierActive ? (s.alert_sell || s.alert_sold ? "Ativo" : "Desligado") : "Precisa de Discord ou Telegram"}
+          />
+        }
+      >
         <div className="space-y-3">
           <Check2 checked={s.alert_sold} onChange={(v) => run(async () => fill(await admin.saveSettings({ alert_sold: v })), v ? "Aviso de venda ligado." : "Aviso de venda desligado.")}>
             Avisar quando um anúncio das minhas contas for vendido
@@ -909,17 +1028,28 @@ function GlobalForm() {
       )}
 
       <ConfirmDialog
-        open={confirmRemove}
-        title="Remover o webhook?"
-        message="O bot deixa de enviar avisos ao Discord. Para voltar, será preciso colar a URL do webhook de novo."
+        open={confirmRemove !== null}
+        title={confirmRemove === "telegram" ? "Remover o Telegram?" : "Remover o webhook do Discord?"}
+        message={
+          confirmRemove === "telegram"
+            ? "O bot deixa de enviar avisos ao Telegram. Para voltar, será preciso informar o Token e o Chat ID novamente."
+            : "O bot deixa de enviar avisos ao Discord. Para voltar, será preciso colar a URL do webhook de novo."
+        }
         confirmLabel="Remover"
         busy={busy}
-        onCancel={() => setConfirmRemove(false)}
+        onCancel={() => setConfirmRemove(null)}
         onConfirm={() =>
-          run(async () => {
-            fill(await admin.saveSettings({ discord_webhook: "" }));
-            setConfirmRemove(false);
-          }, "Webhook removido.")
+          run(
+            async () => {
+              if (confirmRemove === "telegram") {
+                fill(await admin.saveSettings({ telegram_bot_token: "", telegram_chat_id: "" }));
+              } else {
+                fill(await admin.saveSettings({ discord_webhook: "" }));
+              }
+              setConfirmRemove(null);
+            },
+            confirmRemove === "telegram" ? "Telegram removido." : "Webhook removido.",
+          )
         }
       />
     </div>

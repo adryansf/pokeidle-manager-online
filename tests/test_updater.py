@@ -248,6 +248,8 @@ def test_frozen_update_needs_the_installer_asset(monkeypatch):
     u = up.Updater(current="1.0.0")
     u._read_release(release())                       # só o zip do dashboard: instalador ainda não saiu
     assert not u.available
+    u._read_release(installer_release(""))           # instalador sem SHA-256: recusado por segurança
+    assert not u.available
     u._read_release(installer_release("sha256:" + "a" * 64))
     assert u.available and u.installer_sha256 == "a" * 64
     assert u.git_reason() == ""                      # não depende de git clone

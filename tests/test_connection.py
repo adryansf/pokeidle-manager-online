@@ -191,6 +191,19 @@ def test_discord_payload_keeps_webhook_name():
     assert "username" not in payload and payload["embeds"]
 
 
+def test_multi_gateway_telegram_and_discord():
+    import notify
+    # Só Telegram ativo
+    n = notify.Notifier("", telegram_token="123456:ABCDEF1234567890abcdef", telegram_chat_id="-100999")
+    assert n.enabled and not n.discord_active and n.telegram_active
+    n.send("Ash", "✨ capturou um shiny **Gengar**!", notify.GOLD, [("Total no dia", "2", True)])
+    item = n._queue.get_nowait()
+    html_msg = notify.embed_to_telegram_html(item["embeds"][0])
+    assert "<b>Ash</b>" in html_msg
+    assert "<b>Gengar</b>" in html_msg
+    assert "• <b>Total no dia:</b> 2" in html_msg
+
+
 def test_external_login_wait_is_configurable():
     import config as cfg
     assert cfg.external_login_wait_s() == 300             # padrão: 5 min

@@ -67,7 +67,13 @@ export interface GlobalSettings {
   report_tz: string;
   public_url: string;
   hasWebhook: boolean;
+  discord_enabled: boolean;
   webhookHint: string;
+  hasTelegram: boolean;
+  telegram_enabled: boolean;
+  telegramTokenHint: string;
+  telegram_chat_id: string;
+  hasNotifier: boolean;
   alert_sell: boolean;
   alert_sell_pct: number;
   alert_sold: boolean;
@@ -167,7 +173,8 @@ export const admin = {
     call<{ ok: boolean; ip?: string; detail?: string }>("POST", "/api/proxy/test", { proxy, account_id: accountId ?? null }),
   settings: () => call<GlobalSettings>("GET", "/api/settings"),
   saveSettings: (b: Record<string, unknown>) => call<GlobalSettings>("PUT", "/api/settings", b),
-  testWebhook: () => call<{ ok: boolean }>("POST", "/api/settings/test-webhook"),
+  testWebhook: (gateway?: "discord" | "telegram" | "all") =>
+    call<{ ok: boolean; gateway?: string }>("POST", `/api/settings/test-webhook${gateway ? `?gateway=${gateway}` : ""}`),
   update: () => call<UpdateState>("GET", "/api/update"),
   checkUpdate: () => call<UpdateState>("POST", "/api/update/check"),
   applyUpdate: () => call<UpdateResult>("POST", "/api/update/apply"),

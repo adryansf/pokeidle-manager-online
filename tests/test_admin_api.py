@@ -128,19 +128,35 @@ def test_toggle_restart_delete(client):
 
 def test_settings_validation_and_secret_masking(client):
     hook = "https://discord.com/api/webhooks/123456/abcDEF-_ghi"
+    tg_tok = "123456789:ABCdefGHIjklMNOpqrSTUvwxYZ1234"
     assert client.put("/api/settings", headers=H, json={"discord_webhook": "http://evil.example/x"}).status_code == 400
     assert client.put("/api/settings", headers=H, json={"ws_url": "http://x"}).status_code == 400
+    assert client.put("/api/settings", headers=H, json={"ws_url": "wss://evil.example"}).status_code == 400
+    assert client.put("/api/settings", headers=H, json={"ws_url": "wss://pokeidle.io"}).status_code == 200
+    assert client.put("/api/settings", headers=H, json={"telegram_bot_token": "invalido"}).status_code == 400
+    assert client.put("/api/settings", headers=H, json={"telegram_chat_id": "chat invalido!"}).status_code == 400
     assert client.put("/api/settings", headers=H, json={"report_tz": "Marte/Olimpo"}).status_code == 400
     assert client.put("/api/settings", headers=H, json={"report_hour": 24}).status_code == 422
     r = client.put("/api/settings", headers=H, json={"discord_webhook": hook, "report_hour": 5,
+                                                      "telegram_bot_token": tg_tok, "telegram_chat_id": "-1001234567890",
                                                       "public_url": "https://x.example/"})
     j = r.json()
     assert r.status_code == 200 and j["hasWebhook"] is True and hook not in r.text
+    assert j["hasTelegram"] is True and tg_tok not in r.text and j["telegram_chat_id"] == "-1001234567890"
+    assert j["hasNotifier"] is True
     assert j["public_url"] == "https://x.example" and j["report_hour"] == 5
-    client.put("/api/settings", headers=H, json={"report_hour": 6})  # sem o campo: mantém o webhook
+    client.put("/api/settings", headers=H, json={"report_hour": 6})  # sem o campo: mantém os segredos
     assert client.get("/api/settings", headers=H).json()["hasWebhook"] is True
-    client.put("/api/settings", headers=H, json={"discord_webhook": ""})  # vazio: limpa
-    assert client.get("/api/settings", headers=H).json()["hasWebhook"] is False
+    assert client.get("/api/settings", headers=H).json()["hasTelegram"] is True
+    # Pausa o Discord, mas o Telegram continua ativo => hasNotifier continua True
+    j2 = client.put("/api/settings", headers=H, json={"discord_enabled": False}).json()
+    assert j2["discord_enabled"] is False and j2["hasNotifier"] is True
+    # Pausa também o Telegram => hasNotifier vira False
+    j3 = client.put("/api/settings", headers=H, json={"telegram_enabled": False}).json()
+    assert j3["telegram_enabled"] is False and j3["hasNotifier"] is False
+    client.put("/api/settings", headers=H, json={"discord_webhook": "", "telegram_bot_token": "", "telegram_chat_id": ""})
+    j4 = client.get("/api/settings", headers=H).json()
+    assert j4["hasWebhook"] is False and j4["hasTelegram"] is False
 
 
 def test_alert_settings_roundtrip(client):
@@ -158,9 +174,15 @@ def local(monkeypatch):
     monkeypatch.setattr(admin_api.login_window, "available", lambda: True)
 
 
-def test_login_window_only_for_local_clients(client):
+def test_login_window_only_for_local_clients(client, monkeypatch):
     assert client.get("/api/login-window", headers=H).json() == {"available": False}   # "testclient" não é loopback
     assert client.post("/api/login-window", headers=H).status_code == 400
+    # Mesmo com IP local, se vier por proxy reverso (X-Forwarded-For), deve ser bloqueado
+    monkeypatch.setattr(admin_api, "LOOPBACK_CLIENTS", ("testclient",))
+    monkeypatch.setattr(admin_api.login_window, "available", lambda: True)
+    proxied = {**H, "X-Forwarded-For": "198.51.100.10"}
+    assert client.get("/api/login-window", headers=proxied).json() == {"available": False}
+    assert client.post("/api/login-window", headers=proxied).status_code == 400
 
 
 def test_login_window_flow_keeps_token_server_side(client, local, monkeypatch):

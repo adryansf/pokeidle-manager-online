@@ -84,7 +84,7 @@ class Updater:
     @property
     def available(self) -> bool:
         a, b = parse_version(self.latest or ""), parse_version(self.current)
-        return bool(a and b and a > b and (self.installer_url if FROZEN else self.asset_url))
+        return bool(a and b and a > b and ((self.installer_url and self.installer_sha256) if FROZEN else self.asset_url))
 
     def git_reason(self) -> str:
         """Vazio se esta instalação pode se atualizar sozinha; senão, o motivo."""
@@ -281,7 +281,7 @@ class Updater:
         except Exception as e:  # noqa: BLE001
             shutil.rmtree(folder, ignore_errors=True)
             raise UpdateError(f"Não consegui baixar a atualização ({type(e).__name__}).") from None
-        if self.installer_sha256 and sha.hexdigest() != self.installer_sha256:
+        if not self.installer_sha256 or sha.hexdigest() != self.installer_sha256:
             shutil.rmtree(folder, ignore_errors=True)
             raise UpdateError("O arquivo baixado não confere com o publicado. Nada foi instalado.")
         self.step = "Instalando…"

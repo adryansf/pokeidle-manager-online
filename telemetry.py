@@ -272,19 +272,27 @@ _SECURITY_HEADERS = {
 
 
 # O worker da "Melhor hunt" roda o motor de um site de terceiros (PokéIdle Hub). Esta CSP, entregue com o próprio
-# arquivo do worker, só deixa esse código falar com o Hub: ele não alcança a nossa API nem outros sites.
+# arquivo do worker, só deixa esse código falar com o Hub e o isola em sandbox: ele não alcança a nossa API.
 HUNT_HUB = "https://pokeidle-gg.pages.dev"
-_WORKER_CSP = f"default-src 'none'; script-src {HUNT_HUB}; connect-src {HUNT_HUB}"
+_WORKER_CSP = f"default-src 'none'; script-src {HUNT_HUB}; connect-src {HUNT_HUB}; sandbox allow-scripts"
 _WORKER_PATH = "/hunt-worker.js"
+
+
+def _origin_matches_host(headers, cors_origins: list[str] | None = None) -> bool:
+    """Confere se o cabeçalho Origin (quando enviado pelo navegador) pertence ao próprio host ou às origens CORS."""
+    origin = headers.get("origin")
+    if not origin:
+        return True  # clientes que não são navegador (scripts com token) não enviam Origin
+    if cors_origins and ("*" in cors_origins or origin in cors_origins):
+        return True
+    from urllib.parse import urlparse
+    host = (headers.get("x-forwarded-host") or headers.get("host", "")).split(",")[0].strip()
+    return urlparse(origin).netloc == host
 
 
 def _ws_origin_ok(ws: WebSocket) -> bool:
     """Bloqueia WebSocket iniciado por outro site (CSWSH): a origem precisa ser o próprio host."""
-    origin = ws.headers.get("origin")
-    if not origin:
-        return True  # clientes que não são navegador (scripts com token) não enviam Origin
-    from urllib.parse import urlparse
-    return urlparse(origin).netloc == ws.headers.get("host", "")
+    return _origin_matches_host(ws.headers)
 
 
 def create_app(
@@ -303,6 +311,8 @@ def create_app(
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
+        if request.method in ("POST", "PUT", "PATCH", "DELETE") and not _origin_matches_host(request.headers, cors_origins):
+            return JSONResponse({"error": "Origem não autorizada (CSRF)."}, status_code=403)
         resp = await call_next(request)
         for k, v in _SECURITY_HEADERS.items():
             resp.headers.setdefault(k, v)

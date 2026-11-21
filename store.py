@@ -20,20 +20,24 @@ log = logging.getLogger("store")
 
 DEVICE_ID_RE = re.compile(r"^[a-zA-Z0-9-]{8,64}$")  # mesmo formato aceito pelo jogo
 
-# Configurações globais: chave -> (padrão, é segredo)
+# Configurações globais: chave -> padrão
 SETTING_DEFAULTS: dict[str, str] = {
     "ws_url": config.DEFAULT_WS_URL,
     "discord_webhook": "",
+    "discord_enabled": "1",
+    "telegram_bot_token": "",
+    "telegram_chat_id": "",
+    "telegram_enabled": "1",
     "report_hour": "0",
     "report_tz": "America/Sao_Paulo",
     "public_url": "",
     "sniper_enabled": "0",   # chave geral: sem ela ligada, nenhuma regra de compra automática roda
-    "alert_sell": "1",       # Discord: item meu está bem acima da média (bom momento de vender)
+    "alert_sell": "1",       # item meu está bem acima da média (bom momento de vender)
     "alert_sell_pct": "30",  # quanto acima da média (%) para avisar
-    "alert_sold": "1",       # Discord: um anúncio de uma das minhas contas foi vendido
+    "alert_sold": "1",       # um anúncio de uma das minhas contas foi vendido
     "external_login_wait_min": "5",   # min de espera antes de reconectar uma conta aberta em outro lugar
 }
-SECRET_SETTINGS = {"discord_webhook"}
+SECRET_SETTINGS = {"discord_webhook", "telegram_bot_token"}
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
@@ -446,10 +450,13 @@ class Store:
                 self.add_account(acc, acc_id=acc["id"])  # preserva o id (acc1..acc4)
                 n += 1
         for env_key, key in (("WS_URL", "ws_url"), ("DISCORD_WEBHOOK_URL", "discord_webhook"),
+                             ("TELEGRAM_BOT_TOKEN", "telegram_bot_token"), ("TELEGRAM_CHAT_ID", "telegram_chat_id"),
                              ("DAILY_REPORT_HOUR", "report_hour"), ("REPORT_TZ", "report_tz"),
                              ("PUBLIC_URL", "public_url")):
             val = os.getenv(env_key, "").strip()
             if val and not val.startswith("wss://CHANGE_ME"):
+                if key == "ws_url" and not config.is_allowed_ws_url(val):
+                    continue
                 self.set_setting(key, val.rstrip("/") if key == "public_url" else val)
         self.set_setting("env_imported", "1")
         if n:

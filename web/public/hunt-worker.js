@@ -3,7 +3,15 @@
 //
 // Segurança: este arquivo é servido com uma CSP própria (ver telemetry.py) que só permite falar com o
 // site do Hub. Mesmo sendo da mesma origem do painel, o código de fora não consegue chamar a nossa API.
+// Além disso, removemos o acesso ao Cache Storage (PWA) e ao IndexedDB antes de carregar qualquer módulo externo.
 // Entrada: o Pokémon equipado (já com os stats do jogo) e o nível do treinador. Nada disso sai do navegador.
+for (const api of ["caches", "indexedDB"]) {
+  try {
+    Object.defineProperty(self, api, { value: undefined, writable: false, configurable: false });
+  } catch {
+    /* ambiente sem a propriedade */
+  }
+}
 const HUB = "https://pokeidle-gg.pages.dev";
 const BLOCO = 100;
 const ZERO = { hp: 0, atk: 0, def: 0, spAtk: 0, spDef: 0, speed: 0 };

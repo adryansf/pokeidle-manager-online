@@ -85,12 +85,26 @@ class Auth:
 
     # ---------------------------------------------------------- limite de tentativas
     @staticmethod
-    def client_ip(request: Request) -> str:
-        """IP real do cliente. Atrás de proxy local (Caddy/nginx no mesmo servidor) o socket é sempre
-        127.0.0.1: nesse caso vale o último X-Forwarded-For (o que o proxy acrescentou). De qualquer outro
-        par, o cabeçalho é ignorado (falsificável)."""
-        peer = request.client.host if request.client else "?"
+    def _trusted_proxy(peer: str) -> bool:
         if peer in LOOPBACK:
+            return True
+        if os.getenv("TRUST_PROXY") == "1":
+            import ipaddress
+            try:
+                ip = ipaddress.ip_address(peer)
+                cgnat = ipaddress.ip_network("100.64.0.0/10")
+                return ip.is_loopback or (ip.is_private and (ip.version != 4 or ip not in cgnat))
+            except ValueError:
+                return False
+        return False
+
+    @staticmethod
+    def client_ip(request: Request) -> str:
+        """IP real do cliente. Atrás de proxy local (Caddy/nginx no mesmo servidor) ou de container de proxy
+        na rede privada do Docker/Dokploy (TRUST_PROXY=1), vale o último X-Forwarded-For acrescentado pelo proxy.
+        De qualquer outro par, o cabeçalho é ignorado (falsificável)."""
+        peer = request.client.host if request.client else "?"
+        if Auth._trusted_proxy(peer):
             fwd = request.headers.get("x-forwarded-for", "")
             last = fwd.split(",")[-1].strip()
             if last:

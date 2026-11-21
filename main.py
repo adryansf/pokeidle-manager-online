@@ -31,8 +31,8 @@ async def amain() -> None:
     desktop = os.getenv("POKEIDLE_DESKTOP") == "1"
     # App do Windows: configuração só da própria pasta de dados; nunca puxa o .env de outro projeto.
     load_dotenv(os.path.join(os.path.dirname(os.getenv("DATA_DIR", "")), ".env") if desktop else None)
-    if desktop:                         # Tailscale e rede local chegam pelo IP do PC: escuta em todas as interfaces
-        os.environ.setdefault("TELEMETRY_HOST", "0.0.0.0")      # mude em %LOCALAPPDATA%\PokeIdleManager\.env
+    if desktop and os.getenv("POKEIDLE_LAN") == "1":  # só expõe na rede local se POKEIDLE_LAN=1 ou TELEMETRY_HOST definido no .env
+        os.environ.setdefault("TELEMETRY_HOST", "0.0.0.0")
     store = Store()
     if not desktop:
         store.import_env_once()
@@ -44,11 +44,13 @@ async def amain() -> None:
     exposed = host not in LOOPBACK
     auth = Auth(store, exposed=exposed, desktop=desktop)
 
-    notifier = Notifier(store.get_setting("discord_webhook"))
+    notifier = Notifier.from_store(store)
     daily = DailyStats(report_hour=int(store.get_setting("report_hour") or 0),
                        tz_name=store.get_setting("report_tz"))
     notify.set_public_url(store.get_setting("public_url"))
-    log.info("Webhook Discord: %s", "ligado" if notifier.enabled else "desligado")
+    log.info("Notificações: Discord=%s | Telegram=%s",
+             "ligado" if notifier.discord_active else "desligado",
+             "ligado" if notifier.telegram_active else "desligado")
     manager = AccountManager(store, notifier, daily)
     updater = Updater()
 
