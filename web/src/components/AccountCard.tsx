@@ -955,6 +955,13 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
                   { gameAutoRevive: !acc.automation.gameAutoRevive },
                   "Usar Revive automaticamente ao desmaiar (configuração nativa do jogo).",
                 ],
+                [
+                  "autoVoltarHunt",
+                  "Voltar à hunt ao desmaiar",
+                  Boolean(acc.automation.autoVoltarHunt),
+                  { autoVoltarHunt: !acc.automation.autoVoltarHunt },
+                  "Voltar automaticamente à hunt após desmaiar e se recuperar no Centro Pokémon.",
+                ],
                 ["autoCatch", "Capturar", acc.automation.autoCatch, { autoCatch: !acc.automation.autoCatch }, "Lançar Pokébola automaticamente em selvagens."],
                 ["autoPotionFallback", "Fallback Poção", acc.automation.autoPotionFallback, { autoPotionFallback: !acc.automation.autoPotionFallback }, "Trocar para próxima poção disponível na mochila se a atual zerar."],
                 ["autoCenter", `Centro ≤${acc.automation.autoCenterHpPct}%`, acc.automation.autoCenter, { autoCenter: !acc.automation.autoCenter }, "Ir ao Centro Pokémon automaticamente em emergência sem poções."],
@@ -973,7 +980,8 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
               <button
                 key={key}
                 type="button"
-                disabled={autoBusy === key || ((key === "gameAutoPotion" || key === "gameAutoRevive") && acc.status !== "online")}
+                disabled={autoBusy === key || (["gameAutoPotion", "gameAutoRevive", "autoVoltarHunt"].includes(key) && acc.status !== "online")}
+                aria-pressed={on}
                 title={`${tip} — clique para ${on ? "desativar" : "ativar"}`}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
