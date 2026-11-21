@@ -1222,7 +1222,7 @@ class AccountConnection:
             self._wake_event.set()
 
     async def _check_manual_pause_center(self) -> None:
-        """Aguarda a conta entrar no Pokécentro (sem spammar) e desconecta de vez em PAUSED_MANUAL."""
+        """Tenta ir ao Pokécentro sempre que sair do combate até confirmar noCentro, e então desconecta em PAUSED_MANUAL."""
         if not self._pause_disconnect_when_center:
             return
         if self.is_in_center() or not self.can_send:
@@ -1233,15 +1233,11 @@ class AccountConnection:
         if self.combat_lock_ms() > 0:
             return
         now = time.monotonic()
-        if self._pause_attempts >= 3 and (now - self._pause_center_sent_at) >= 2.5:
-            log.info("[%s] pausa manual: encerrando conexão após %d tentativas de centro.ir", self.acc.name, self._pause_attempts)
-            await self._finish_manual_pause_disconnect()
-            return
         if self._pause_attempts == 0 or (now - self._pause_center_sent_at) >= 2.5:
             self._pause_attempts += 1
             self._pause_center_sent_at = now
             await self.hunt.go_to_center()
-            log.info("[%s] pausa manual: centro.ir enviado (%d/3)", self.acc.name, self._pause_attempts)
+            log.info("[%s] pausa manual: centro.ir enviado (tentativa #%d)", self.acc.name, self._pause_attempts)
 
     async def set_manual_pause(self, paused: bool, *, force: str | None = None) -> None:
         """Pausa (vai ao Pokécentro e desconecta sem tentar reconectar) ou retoma a conta."""
