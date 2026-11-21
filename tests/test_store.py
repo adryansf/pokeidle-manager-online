@@ -99,3 +99,25 @@ def test_db_file_is_private(tmp_path):
     p = tmp_path / "x.db"
     Store(str(p))
     assert (p.stat().st_mode & 0o777) == 0o600
+
+
+def test_saved_proxies_crud(store):
+    pid = store.add_proxy({
+        "name": "ISP BR 1",
+        "scheme": "socks5",
+        "host": "185.10.20.30",
+        "port": 1080,
+        "username": "u1",
+        "password": "secret",
+        "notes": "Webshare",
+    })
+    row = store.get_proxy(pid)
+    assert row is not None and row["name"] == "ISP BR 1" and row["port"] == 1080 and row["last_ok"] is None
+    store.set_proxy_test(pid, True, ip="185.10.20.30")
+    row = store.get_proxy(pid)
+    assert row["last_ok"] is True and row["last_ip"] == "185.10.20.30" and row["last_tested_at"] is not None
+    store.update_proxy(pid, {"host": "185.10.20.31", "port": 1081})
+    row = store.get_proxy(pid)
+    assert row["host"] == "185.10.20.31" and row["port"] == 1081 and row["last_ok"] is None
+    store.delete_proxy(pid)
+    assert store.get_proxy(pid) is None

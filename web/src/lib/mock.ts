@@ -394,6 +394,21 @@ function installMockApi(accs: AccountSnapshot[]) {
       return json({ ok: true, confirmed: true, claim: { degrau: 7, premios: [{ trilha: "free", tipo: "coins", qtd: 1_000_000 }, { trilha: "free", tipo: "boost", boost: "loot", horas: 1 }] } });
     }
     if (path === "/api/accounts" && (!init?.method || init.method === "GET")) return json({ max: 4, accounts: [] });
+    if (path === "/api/proxies") {
+      if (init?.method === "POST") {
+        const b = JSON.parse(String(init.body));
+        return json({ ok: true, proxy: { id: 99, name: b.name || `${b.host}:${b.port}`, rawName: b.name || "", scheme: b.scheme, host: b.host, port: b.port, username: b.username || "", hasPassword: !!b.password, notes: b.notes || "", lastIp: "", lastOk: null, lastError: "", lastTestedAt: null, usedBy: [] } });
+      }
+      return json({ proxies: [{ id: 1, name: "ISP Brasil 1", rawName: "ISP Brasil 1", scheme: "socks5", host: "185.12.34.56", port: 1080, username: "user1", hasPassword: true, notes: "Webshare", lastIp: "185.12.34.56", lastOk: true, lastError: "", lastTestedAt: Date.now() - 45_000, usedBy: [{ id: 1, nick: "Treinador1" }] }] });
+    }
+    if (path === "/api/proxies/bulk" || path === "/api/proxies/import-from-accounts" || path === "/api/proxies/test-all") {
+      await wait();
+      return json({ ok: true, added: 1, skipped: 0, errors: [], proxies: [] });
+    }
+    if (path.match(/^\/api\/proxies\/\d+(\/(test|assign))?$/)) {
+      await wait();
+      return json({ ok: true, ip: "185.12.34.56", latencyMs: 142, applied: [1], syncedAccounts: 1, proxy: { id: 1, name: "ISP Brasil 1", rawName: "ISP Brasil 1", scheme: "socks5", host: "185.12.34.56", port: 1080, username: "user1", hasPassword: true, notes: "Webshare", lastIp: "185.12.34.56", lastOk: true, lastError: "", lastTestedAt: Date.now(), usedBy: [{ id: 1, nick: "Treinador1" }] } });
+    }
     if (path === "/api/login-window") {
       if (init?.method === "POST") {
         await wait();

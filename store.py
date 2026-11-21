@@ -112,6 +112,21 @@ CREATE TABLE IF NOT EXISTS market_log (
     status TEXT NOT NULL,
     text TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS proxies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL DEFAULT '',
+    scheme TEXT NOT NULL DEFAULT 'socks5',
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    username TEXT NOT NULL DEFAULT '',
+    password TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    last_ip TEXT NOT NULL DEFAULT '',
+    last_ok INTEGER,
+    last_error TEXT NOT NULL DEFAULT '',
+    last_tested_at REAL,
+    created_at REAL NOT NULL
+);
 """
 
 
@@ -238,6 +253,90 @@ class Store:
     def delete_account(self, acc_id: int) -> None:
         with self._lock:
             self._db.execute("DELETE FROM accounts WHERE id=?", (acc_id,))
+            self._db.commit()
+
+    # ----------------------------------------------------------- central de proxies
+    @staticmethod
+    def _proxy_row(r: sqlite3.Row) -> dict:
+        return {
+            "id": r["id"],
+            "name": r["name"] or "",
+            "scheme": r["scheme"] or "socks5",
+            "host": r["host"],
+            "port": int(r["port"]),
+            "username": r["username"] or "",
+            "password": r["password"] or "",
+            "notes": r["notes"] or "",
+            "last_ip": r["last_ip"] or "",
+            "last_ok": None if r["last_ok"] is None else bool(r["last_ok"]),
+            "last_error": r["last_error"] or "",
+            "last_tested_at": r["last_tested_at"],
+            "created_at": r["created_at"],
+        }
+
+    def list_proxies(self) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute("SELECT * FROM proxies ORDER BY id").fetchall()
+        return [self._proxy_row(r) for r in rows]
+
+    def get_proxy(self, proxy_id: int) -> dict | None:
+        with self._lock:
+            r = self._db.execute("SELECT * FROM proxies WHERE id=?", (proxy_id,)).fetchone()
+        return self._proxy_row(r) if r else None
+
+    def add_proxy(self, d: dict) -> int:
+        with self._lock:
+            cur = self._db.execute(
+                "INSERT INTO proxies (name, scheme, host, port, username, password, notes, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    (d.get("name") or "").strip(),
+                    (d.get("scheme") or "socks5").strip().lower(),
+                    d["host"].strip(),
+                    int(d["port"]),
+                    d.get("username") or "",
+                    d.get("password") or "",
+                    (d.get("notes") or "").strip(),
+                    time.time(),
+                ),
+            )
+            self._db.commit()
+            return int(cur.lastrowid)
+
+    def update_proxy(self, proxy_id: int, changes: dict) -> None:
+        cols: list[str] = []
+        vals: list = []
+        for k in ("name", "scheme", "host", "port", "username", "password", "notes"):
+            if k in changes:
+                cols.append(f"{k}=?")
+                v = changes[k]
+                if k == "scheme" and isinstance(v, str):
+                    v = v.strip().lower()
+                elif k in ("name", "host", "notes") and isinstance(v, str):
+                    v = v.strip()
+                elif k == "port":
+                    v = int(v)
+                vals.append(v)
+        if any(k in changes for k in ("scheme", "host", "port", "username", "password")):
+            cols += ["last_ok=?", "last_ip=?", "last_error=?", "last_tested_at=?"]
+            vals += [None, "", "", None]
+        if not cols:
+            return
+        with self._lock:
+            self._db.execute(f"UPDATE proxies SET {', '.join(cols)} WHERE id=?", (*vals, proxy_id))
+            self._db.commit()
+
+    def set_proxy_test(self, proxy_id: int, ok: bool, ip: str = "", error: str = "") -> None:
+        with self._lock:
+            self._db.execute(
+                "UPDATE proxies SET last_ok=?, last_ip=?, last_error=?, last_tested_at=? WHERE id=?",
+                (1 if ok else 0, ip if ok else "", "" if ok else error[:300], time.time(), proxy_id),
+            )
+            self._db.commit()
+
+    def delete_proxy(self, proxy_id: int) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM proxies WHERE id=?", (proxy_id,))
             self._db.commit()
 
     # ----------------------------------------------------------- configurações

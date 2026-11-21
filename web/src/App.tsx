@@ -1,5 +1,5 @@
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from "framer-motion";
-import { Bell, LayoutDashboard, Map as MapIcon, MessagesSquare, Package, RotateCcw, Settings, Store, Swords, Ticket } from "lucide-react";
+import { Bell, Globe, LayoutDashboard, Map as MapIcon, MessagesSquare, Package, RotateCcw, Settings, Store, Swords, Ticket } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccountCard, type CardDrag, type CardMode } from "@/components/AccountCard";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
@@ -7,6 +7,7 @@ import { AccountSelect, InventoryView } from "@/components/InventoryView";
 import { MapaView } from "@/components/MapaView";
 import { MarketView } from "@/components/market/MarketView";
 import { PassView } from "@/components/PassView";
+import { ProxyCenterModal } from "@/components/ProxyCenter";
 import { PvpView } from "@/components/PvpView";
 import { NotificationsModal, SettingsView } from "@/components/SettingsView";
 import { SummaryBar } from "@/components/SummaryBar";
@@ -171,6 +172,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>(readTab);
   const [mode, setMode] = useState<CardMode>("resumo");
   const [notifyOpen, setNotifyOpen] = useState(false);
+  const [proxyCenterOpen, setProxyCenterOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetErr, setResetErr] = useState("");
@@ -273,8 +275,18 @@ export default function App() {
                       <Segmented id="mode" options={MODES} value={mode} onChange={setMode} />
                       <button
                         type="button"
-                        aria-label="Notificações (Discord e Telegram)"
+                        aria-label="Central de Proxies"
                         className="btn ml-auto sm:ml-0"
+                        onClick={() => setProxyCenterOpen(true)}
+                        title="Gerenciar, testar e aplicar proxies nas contas"
+                      >
+                        <Globe className="size-4 text-poke-gold" aria-hidden />
+                        <span className="hidden sm:inline">Proxies</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Notificações (Discord e Telegram)"
+                        className="btn"
                         onClick={() => setNotifyOpen(true)}
                         title="Configurar notificações do Discord e/ou Telegram"
                       >
@@ -303,6 +315,7 @@ export default function App() {
           </header>
 
           <AnimatePresence>{notifyOpen && <NotificationsModal onClose={() => setNotifyOpen(false)} />}</AnimatePresence>
+          <AnimatePresence>{proxyCenterOpen && <ProxyCenterModal onClose={() => setProxyCenterOpen(false)} />}</AnimatePresence>
 
           <ConfirmDialog
             open={resetOpen}

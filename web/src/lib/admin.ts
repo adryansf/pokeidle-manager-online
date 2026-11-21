@@ -45,6 +45,34 @@ export interface ProxyInput {
   username: string;
   password?: string | null;
 }
+export interface SavedProxy {
+  id: number;
+  name: string;
+  rawName: string;
+  scheme: string;
+  host: string;
+  port: number;
+  username: string;
+  hasPassword: boolean;
+  notes: string;
+  lastIp: string;
+  lastOk: boolean | null;
+  lastError: string;
+  lastTestedAt: number | null;
+  usedBy: { id: number; nick: string }[];
+}
+export interface SavedProxyInput extends ProxyInput {
+  name?: string;
+  notes?: string;
+  sync_accounts?: boolean;
+}
+export interface BulkProxyResult {
+  ok: boolean;
+  added: number;
+  skipped: number;
+  errors: string[];
+  proxies: SavedProxy[];
+}
 export interface TestResult {
   ok: boolean;
   kind: string;
@@ -163,6 +191,7 @@ export const admin = {
     token?: string;
     device_id?: string;
     proxy?: ProxyInput | null;
+    proxy_id?: number | null;
     skip_test?: boolean;
   }) => call<ImportResult>("POST", "/api/accounts/import", b),
   patch: (id: number, b: Record<string, unknown>) => call<{ ok: boolean; account: AdminAccount }>("PATCH", `/api/accounts/${id}`, b),
@@ -171,6 +200,19 @@ export const admin = {
   test: (id: number) => call<TestResult>("POST", `/api/accounts/${id}/test`),
   testProxy: (proxy: ProxyInput, accountId?: number) =>
     call<{ ok: boolean; ip?: string; detail?: string }>("POST", "/api/proxy/test", { proxy, account_id: accountId ?? null }),
+  proxies: () => call<{ proxies: SavedProxy[] }>("GET", "/api/proxies"),
+  createProxy: (b: SavedProxyInput) => call<{ ok: boolean; proxy: SavedProxy }>("POST", "/api/proxies", b),
+  bulkImportProxies: (text: string, default_scheme = "socks5") =>
+    call<BulkProxyResult>("POST", "/api/proxies/bulk", { text, default_scheme }),
+  importProxiesFromAccounts: () => call<{ ok: boolean; added: number; proxies: SavedProxy[] }>("POST", "/api/proxies/import-from-accounts"),
+  updateProxy: (id: number, b: SavedProxyInput) =>
+    call<{ ok: boolean; syncedAccounts: number; proxy: SavedProxy }>("PATCH", `/api/proxies/${id}`, b),
+  deleteProxy: (id: number) => call<{ ok: boolean }>("DELETE", `/api/proxies/${id}`),
+  testSavedProxy: (id: number) =>
+    call<{ ok: boolean; ip?: string; latencyMs?: number; detail?: string; proxy: SavedProxy }>("POST", `/api/proxies/${id}/test`),
+  testAllProxies: () => call<{ ok: boolean; proxies: SavedProxy[] }>("POST", "/api/proxies/test-all"),
+  assignProxy: (id: number, account_ids: number[]) =>
+    call<{ ok: boolean; applied: number[]; proxy: SavedProxy }>("POST", `/api/proxies/${id}/assign`, { account_ids }),
   settings: () => call<GlobalSettings>("GET", "/api/settings"),
   saveSettings: (b: Record<string, unknown>) => call<GlobalSettings>("PUT", "/api/settings", b),
   testWebhook: (gateway?: "discord" | "telegram" | "all") =>

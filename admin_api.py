@@ -74,6 +74,7 @@ class ImportIn(BaseModel):
     token: str | None = None
     device_id: str | None = None
     proxy: ProxyIn | None = None
+    proxy_id: int | None = None        # alternativa: usar proxy salvo na Central de Proxies
     options: OptionsIn | None = None
     skip_test: bool = False            # salvar sem conectar para testar
 
@@ -84,12 +85,33 @@ class AccountPatch(BaseModel):
     device_id: str | None = None
     enabled: bool | None = None
     proxy: ProxyIn | None = None       # enviar null remove o proxy
+    proxy_id: int | None = None        # escolher proxy da Central (sobrepõe proxy se informado)
     options: OptionsIn | None = None
 
 
 class ProxyTestIn(BaseModel):
     proxy: ProxyIn
     account_id: int | None = None      # p/ reaproveitar a senha salva se password=None
+
+
+class SavedProxyIn(BaseModel):
+    name: str = Field("", max_length=80)
+    scheme: str = "socks5"
+    host: str = Field(min_length=1, max_length=253)
+    port: int = Field(ge=1, le=65535)
+    username: str = Field("", max_length=256)
+    password: str | None = Field(None, max_length=256)
+    notes: str = Field("", max_length=240)
+    sync_accounts: bool = True
+
+
+class SavedProxyBulkIn(BaseModel):
+    text: str = Field(min_length=1, max_length=50000)
+    default_scheme: str = "socks5"
+
+
+class ProxyAssignIn(BaseModel):
+    account_ids: list[int] = Field(default_factory=list)
 
 
 class SettingsIn(BaseModel):
@@ -160,6 +182,84 @@ def _proxy_dict(p: ProxyIn | None, keep_password: str = "") -> dict | None:
         raise ValueError(f"Esquema de proxy inválido: {scheme} (use {', '.join(sorted(config.VALID_SCHEMES))})")
     return {"scheme": scheme, "host": p.host.strip(), "port": p.port, "username": p.username,
             "password": keep_password if p.password is None else p.password}
+
+
+def parse_proxy_line(line: str, default_scheme: str = "socks5") -> dict:
+    """Interpreta uma linha de proxy nos formatos comuns de provedores:
+    - scheme://user:pass@host:port
+    - scheme://host:port
+    - user:pass@host:port
+    - host:port:user:pass
+    - host:port
+    Suporta apelido opcional ao final com `# Apelido` ou `| Apelido`.
+    """
+    from urllib.parse import unquote, urlparse
+
+    raw = (line or "").strip()
+    if not raw:
+        raise ValueError("Linha vazia")
+    name = ""
+    for sep in ("#", "|"):
+        if sep in raw and "://" not in raw.split(sep, 1)[1]:
+            left, right = raw.split(sep, 1)
+            if left.strip():
+                raw, name = left.strip(), right.strip()[:80]
+                break
+
+    scheme = (default_scheme or "socks5").strip().lower()
+    if scheme not in config.VALID_SCHEMES:
+        scheme = "socks5"
+
+    host = ""
+    port = 0
+    username = ""
+    password = ""
+
+    if "://" in raw:
+        u = urlparse(raw)
+        scheme = (u.scheme or scheme).strip().lower()
+        host = (u.hostname or "").strip()
+        port = int(u.port or 0)
+        username = unquote(u.username or "")
+        password = unquote(u.password or "")
+    elif "@" in raw:
+        creds, addr = raw.rsplit("@", 1)
+        if ":" in creds:
+            username, password = creds.split(":", 1)
+        else:
+            username = creds
+        if ":" not in addr:
+            raise ValueError(f"Porta ausente em '{raw}'")
+        host, port_s = addr.rsplit(":", 1)
+        port = int(port_s)
+    else:
+        parts = raw.split(":")
+        if len(parts) == 2:
+            host, port = parts[0].strip(), int(parts[1])
+        elif len(parts) == 4:
+            # host:port:user:pass (Webshare / Proxy-Seller) ou user:pass:host:port
+            if parts[1].isdigit():
+                host, port, username, password = parts[0].strip(), int(parts[1]), parts[2], parts[3]
+            elif parts[3].isdigit():
+                username, password, host, port = parts[0], parts[1], parts[2].strip(), int(parts[3])
+            else:
+                raise ValueError(f"Porta inválida em '{raw}'")
+        else:
+            raise ValueError(f"Formato não reconhecido: '{raw}'")
+
+    if scheme not in config.VALID_SCHEMES:
+        raise ValueError(f"Esquema de proxy inválido: {scheme}")
+    if not host or not (1 <= port <= 65535):
+        raise ValueError(f"Host ou porta inválidos em '{raw}'")
+    return {
+        "name": name,
+        "scheme": scheme,
+        "host": host,
+        "port": port,
+        "username": username,
+        "password": password,
+        "notes": "",
+    }
 
 
 def _options_dict(o: OptionsIn | None) -> dict:
@@ -273,7 +373,13 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
             err = _validate_creds(creds["nick"], creds["token"], creds["device_id"])
             if err:
                 return JSONResponse({"error": err}, status_code=400)
-            proxy = _proxy_dict(body.proxy)
+            if body.proxy_id is not None:
+                saved = store.get_proxy(body.proxy_id)
+                if saved is None:
+                    return JSONResponse({"error": "Proxy selecionado não encontrado na Central."}, status_code=404)
+                proxy = {k: saved[k] for k in ("scheme", "host", "port", "username", "password")}
+            else:
+                proxy = _proxy_dict(body.proxy)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         generated_device = not creds["device_id"]
@@ -322,7 +428,12 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
                 changes["device_id"] = body.device_id.strip()
             if "enabled" in sent and body.enabled is not None:
                 changes["enabled"] = body.enabled
-            if "proxy" in sent:
+            if "proxy_id" in sent and body.proxy_id is not None:
+                saved = store.get_proxy(body.proxy_id)
+                if saved is None:
+                    return JSONResponse({"error": "Proxy selecionado não encontrado na Central."}, status_code=404)
+                changes["proxy"] = {k: saved[k] for k in ("scheme", "host", "port", "username", "password")}
+            elif "proxy" in sent:
                 keep = row["proxy"]["password"] if row["proxy"] else ""
                 changes["proxy"] = _proxy_dict(body.proxy, keep)
             if "options" in sent:
@@ -383,6 +494,204 @@ def register_admin_routes(app: FastAPI, manager: "AccountManager", store: Store,
         except Exception as e:  # noqa: BLE001 - mostra só o tipo, nunca credenciais
             return {"ok": False, "detail": f"Falha ao usar o proxy ({type(e).__name__})"}
         return {"ok": True, "ip": ip}
+
+    # ---------------------------------------------------------- Central de Proxies
+    def _proxy_key(p: dict | None) -> tuple | None:
+        if not p or not p.get("host"):
+            return None
+        return (str(p.get("scheme") or "socks5").lower(), str(p["host"]).strip().lower(),
+                int(p.get("port") or 0), str(p.get("username") or ""))
+
+    def _proxy_public(row: dict, accounts: list[dict] | None = None) -> dict:
+        accs = accounts if accounts is not None else store.list_accounts()
+        key = _proxy_key(row)
+        used_by = [
+            {"id": a["id"], "nick": a["nick"]}
+            for a in accs
+            if _proxy_key(a.get("proxy")) == key
+        ]
+        return {
+            "id": row["id"],
+            "name": row["name"] or f"{row['host']}:{row['port']}",
+            "rawName": row["name"],
+            "scheme": row["scheme"],
+            "host": row["host"],
+            "port": row["port"],
+            "username": row["username"],
+            "hasPassword": bool(row["password"]),
+            "notes": row["notes"],
+            "lastIp": row["last_ip"],
+            "lastOk": row["last_ok"],
+            "lastError": row["last_error"],
+            "lastTestedAt": int(row["last_tested_at"] * 1000) if row["last_tested_at"] else None,
+            "usedBy": used_by,
+        }
+
+    @app.get("/api/proxies")
+    async def list_proxies(request: Request, tok: str | None = Query(None, alias="token")):
+        if (r := guard(request, tok)):
+            return r
+        accs = store.list_accounts()
+        return {"proxies": [_proxy_public(p, accs) for p in store.list_proxies()]}
+
+    @app.post("/api/proxies")
+    async def create_proxy(body: SavedProxyIn, request: Request, tok: str | None = Query(None, alias="token")):
+        if (r := guard(request, tok)):
+            return r
+        scheme = body.scheme.strip().lower()
+        if scheme not in config.VALID_SCHEMES:
+            return JSONResponse({"error": f"Esquema de proxy inválido: {scheme}"}, status_code=400)
+        pid = store.add_proxy({
+            "name": body.name,
+            "scheme": scheme,
+            "host": body.host,
+            "port": body.port,
+            "username": body.username,
+            "password": body.password or "",
+            "notes": body.notes,
+        })
+        return {"ok": True, "proxy": _proxy_public(store.get_proxy(pid))}
+
+    @app.post("/api/proxies/bulk")
+    async def bulk_import_proxies(body: SavedProxyBulkIn, request: Request, tok: str | None = Query(None, alias="token")):
+        if (r := guard(request, tok)):
+            return r
+        existing = {_proxy_key(p) for p in store.list_proxies()}
+        added = 0
+        skipped = 0
+        errors: list[str] = []
+        for idx, raw_line in enumerate(body.text.splitlines(), start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#") or line.startswith("//"):
+                continue
+            try:
+                parsed = parse_proxy_line(line, body.default_scheme)
+            except ValueError as e:
+                errors.append(f"Linha {idx}: {e}")
+                continue
+            k = _proxy_key(parsed)
+            if k in existing:
+                skipped += 1
+                continue
+            store.add_proxy(parsed)
+            existing.add(k)
+            added += 1
+        accs = store.list_accounts()
+        return {
+            "ok": True,
+            "added": added,
+            "skipped": skipped,
+            "errors": errors[:20],
+            "proxies": [_proxy_public(p, accs) for p in store.list_proxies()],
+        }
+
+    @app.post("/api/proxies/import-from-accounts")
+    async def import_proxies_from_accounts(request: Request, tok: str | None = Query(None, alias="token")):
+        """Traz para a Central de Proxies os proxies já configurados nas contas cadastradas."""
+        if (r := guard(request, tok)):
+            return r
+        existing = {_proxy_key(p) for p in store.list_proxies()}
+        accs = store.list_accounts()
+        added = 0
+        for a in accs:
+            p = a.get("proxy")
+            k = _proxy_key(p)
+            if not p or k in existing:
+                continue
+            store.add_proxy({**p, "name": f"Proxy ({a['nick']})", "notes": ""})
+            existing.add(k)
+            added += 1
+        return {"ok": True, "added": added, "proxies": [_proxy_public(p, accs) for p in store.list_proxies()]}
+
+    @app.patch("/api/proxies/{proxy_id}")
+    async def update_saved_proxy(proxy_id: int, body: SavedProxyIn, request: Request,
+                                 tok: str | None = Query(None, alias="token")):
+        if (r := guard(request, tok)):
+            return r
+        old = store.get_proxy(proxy_id)
+        if old is None:
+            return JSONResponse({"error": "Proxy não encontrado."}, status_code=404)
+        scheme = body.scheme.strip().lower()
+        if scheme not in config.VALID_SCHEMES:
+            return JSONResponse({"error": f"Esquema de proxy inválido: {scheme}"}, status_code=400)
+        old_key = _proxy_key(old)
+        new_pass = old["password"] if body.password is None else body.password
+        store.update_proxy(proxy_id, {
+            "name": body.name,
+            "scheme": scheme,
+            "host": body.host,
+            "port": body.port,
+            "username": body.username,
+            "password": new_pass,
+            "notes": body.notes,
+        })
+        updated = store.get_proxy(proxy_id)
+        synced = 0
+        if body.sync_accounts and old_key is not None:
+            new_proxy_dict = {k: updated[k] for k in ("scheme", "host", "port", "username", "password")}
+            for a in store.list_accounts():
+                if _proxy_key(a.get("proxy")) == old_key:
+                    await manager.update(a["id"], {"proxy": new_proxy_dict})
+                    synced += 1
+        return {"ok": True, "syncedAccounts": synced, "proxy": _proxy_public(updated)}
+
+    @app.delete("/api/proxies/{proxy_id}")
+    async def delete_saved_proxy(proxy_id: int, request: Request, tok: str | None = Query(None, alias="token")):
+        if (r := guard(request, tok)):
+            return r
+        if store.get_proxy(proxy_id) is None:
+            return JSONResponse({"error": "Proxy não encontrado."}, status_code=404)
+        store.delete_proxy(proxy_id)
+        return {"ok": True}
+
+    async def _run_saved_proxy_test(row: dict) -> dict:
+        cfg = ProxyConfig(row["scheme"], row["host"], row["port"], row["username"], row["password"])
+        t0 = time.monotonic()
+        try:
+            ip = await probe_exit_ip(cfg)
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            store.set_proxy_test(row["id"], True, ip=ip)
+            return {"ok": True, "ip": ip, "latencyMs": latency_ms, "detail": f"IP de saída: {ip}"}
+        except Exception as e:  # noqa: BLE001
+            detail = f"Falha ao conectar ({type(e).__name__})"
+            store.set_proxy_test(row["id"], False, error=detail)
+            return {"ok": False, "ip": "", "latencyMs": int((time.monotonic() - t0) * 1000), "detail": detail}
+
+    @app.post("/api/proxies/{proxy_id}/test")
+    async def test_saved_proxy(proxy_id: int, request: Request, tok: str | None = Query(None, alias="token")):
+        if (r := guard(request, tok)):
+            return r
+        row = store.get_proxy(proxy_id)
+        if row is None:
+            return JSONResponse({"error": "Proxy não encontrado."}, status_code=404)
+        res = await _run_saved_proxy_test(row)
+        return {**res, "proxy": _proxy_public(store.get_proxy(proxy_id))}
+
+    @app.post("/api/proxies/test-all")
+    async def test_all_saved_proxies(request: Request, tok: str | None = Query(None, alias="token")):
+        if (r := guard(request, tok)):
+            return r
+        rows = store.list_proxies()
+        if rows:
+            await asyncio.gather(*(_run_saved_proxy_test(r) for r in rows))
+        accs = store.list_accounts()
+        return {"ok": True, "proxies": [_proxy_public(p, accs) for p in store.list_proxies()]}
+
+    @app.post("/api/proxies/{proxy_id}/assign")
+    async def assign_saved_proxy(proxy_id: int, body: ProxyAssignIn, request: Request,
+                                 tok: str | None = Query(None, alias="token")):
+        """Aplica um proxy salvo da Central em uma ou mais contas (e reinicia essas contas)."""
+        if (r := guard(request, tok)):
+            return r
+        row = store.get_proxy(proxy_id)
+        if row is None:
+            return JSONResponse({"error": "Proxy não encontrado."}, status_code=404)
+        proxy_dict = {k: row[k] for k in ("scheme", "host", "port", "username", "password")}
+        applied: list[int] = []
+        for acc_id in body.account_ids:
+            if await manager.update(acc_id, {"proxy": proxy_dict}):
+                applied.append(acc_id)
+        return {"ok": True, "applied": applied, "proxy": _proxy_public(row)}
 
     # ---------------------------------------------------------- configurações globais
     def _settings_public() -> dict:

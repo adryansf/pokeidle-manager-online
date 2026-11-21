@@ -1,5 +1,6 @@
 import { CardStyleSection } from "@/components/CardStyleSection";
 import { LanguageSection } from "@/components/LanguageSection";
+import { ProxyCenterSection, ProxyPicker } from "@/components/ProxyCenter";
 import { AnimatePresence, motion } from "framer-motion";
 import { useScrollLock } from "@/lib/scrollLock";
 import { Check, Copy, Pencil, Plus, Power, RefreshCw, Trash2, TriangleAlert, X } from "lucide-react";
@@ -315,6 +316,7 @@ function AddAccountDialog({ onClose, onDone }: { onClose: () => void; onDone: ()
   const [text, setText] = useState("");
   const [manual, setManual] = useState({ nick: "", token: "", device: "" });
   const [proxy, setProxy] = useState<ProxyForm>(EMPTY_PROXY);
+  const [selectedProxyId, setSelectedProxyId] = useState<number | null>(null);
   const [useProxy, setUseProxy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -350,10 +352,16 @@ function AddAccountDialog({ onClose, onDone }: { onClose: () => void; onDone: ()
     setError(null);
     setFailed(null);
     try {
-      const p = useProxy ? proxyInput(proxy) : null;
-      if (useProxy && (!p || !p.port)) throw new Error("Preencha o host e a porta do proxy (ou desmarque a opção).");
+      const p = useProxy && selectedProxyId === null ? proxyInput(proxy) : null;
+      if (useProxy && selectedProxyId === null && (!p || !p.port)) {
+        throw new Error("Preencha o host e a porta do proxy (ou escolha um da Central).");
+      }
       const base = method === "janela" ? { login_id: login?.id } : method === "manual" ? { nick: manual.nick, token: manual.token, device_id: manual.device } : { text };
-      const r = await admin.importAccount({ ...base, proxy: p, skip_test: skipTest });
+      const r = await admin.importAccount({
+        ...base,
+        ...(useProxy && selectedProxyId !== null ? { proxy_id: selectedProxyId } : { proxy: p }),
+        skip_test: skipTest,
+      });
       if (!r.ok) {
         setFailed(r.test?.detail || "O teste de conexão falhou.");
         return;
@@ -462,7 +470,20 @@ function AddAccountDialog({ onClose, onDone }: { onClose: () => void; onDone: ()
           Usar proxy nesta conta
         </Check2>
         {!useProxy && <p className="text-xs text-mute">Sem proxy, a conta conecta pelo IP desta máquina.</p>}
-        {useProxy && <ProxyFields value={proxy} onChange={setProxy} />}
+        {useProxy && (
+          <div className="space-y-2.5">
+            <ProxyPicker
+              selectedId={selectedProxyId}
+              onSelect={(sp) => {
+                setSelectedProxyId(sp?.id ?? null);
+                if (sp) {
+                  setProxy({ scheme: sp.scheme, host: sp.host, port: String(sp.port), username: sp.username, password: "" });
+                }
+              }}
+            />
+            {selectedProxyId === null && <ProxyFields value={proxy} onChange={setProxy} />}
+          </div>
+        )}
       </div>
 
       {error && <Notice tone="error">{error}</Notice>}
@@ -495,6 +516,7 @@ function EditAccountDialog({ acc, onClose, onDone }: { acc: AdminAccount; onClos
   const [proxy, setProxy] = useState<ProxyForm>(
     acc.proxy ? { scheme: acc.proxy.scheme, host: acc.proxy.host, port: String(acc.proxy.port), username: acc.proxy.username, password: "" } : EMPTY_PROXY,
   );
+  const [selectedProxyId, setSelectedProxyId] = useState<number | null>(null);
   const [opts, setOpts] = useState({
     auto_catch: o.auto_catch,
     auto_potion: o.auto_potion,
@@ -514,7 +536,7 @@ function EditAccountDialog({ acc, onClose, onDone }: { acc: AdminAccount; onClos
     setError(null);
     try {
       const body: Record<string, unknown> = {
-        proxy: proxyInput(proxy, true),
+        ...(selectedProxyId !== null ? { proxy_id: selectedProxyId } : { proxy: proxyInput(proxy, true) }),
         options: {
           auto_catch: opts.auto_catch,
           auto_potion: opts.auto_potion,
@@ -525,7 +547,7 @@ function EditAccountDialog({ acc, onClose, onDone }: { acc: AdminAccount; onClos
           ball_restock_qty: Number(opts.ball_restock_qty),
         },
       };
-      if (proxy.host.trim() && !Number(proxy.port)) throw new Error("Informe a porta do proxy.");
+      if (selectedProxyId === null && proxy.host.trim() && !Number(proxy.port)) throw new Error("Informe a porta do proxy.");
       if (paste.trim()) {
         const p = parsePaste(paste);
         if (!p?.token) throw new Error("Não reconheci os dados colados para atualizar o token.");
@@ -548,10 +570,23 @@ function EditAccountDialog({ acc, onClose, onDone }: { acc: AdminAccount; onClos
 
   return (
     <Modal title={`Editar ${acc.nick}`} onClose={onClose} wide>
-      <div>
-        <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-mute">Proxy</h3>
-        <ProxyFields value={proxy} onChange={setProxy} accountId={acc.numericId} hasSavedPassword={acc.proxy?.hasPassword} />
-        <p className="mt-1.5 text-xs text-mute">Deixe o host vazio para conectar sem proxy.</p>
+      <div className="space-y-2.5">
+        <h3 className="text-sm font-bold uppercase tracking-wide text-mute">Proxy</h3>
+        <ProxyPicker
+          selectedId={selectedProxyId}
+          onSelect={(sp) => {
+            setSelectedProxyId(sp?.id ?? null);
+            if (sp) {
+              setProxy({ scheme: sp.scheme, host: sp.host, port: String(sp.port), username: sp.username, password: "" });
+            }
+          }}
+        />
+        {selectedProxyId === null && (
+          <>
+            <ProxyFields value={proxy} onChange={setProxy} accountId={acc.numericId} hasSavedPassword={acc.proxy?.hasPassword} />
+            <p className="text-xs text-mute">Deixe o host vazio para conectar sem proxy.</p>
+          </>
+        )}
       </div>
       <div className="space-y-2.5">
         <h3 className="text-sm font-bold uppercase tracking-wide text-mute">Automação</h3>
@@ -1205,6 +1240,13 @@ export function SettingsView() {
               <AccountRow acc={a} onChanged={load} />
             </Reveal>
           ))}
+        </div>
+      </Reveal>
+
+      <Reveal as="section" index={3} className="space-y-3">
+        <h2 className="text-lg font-extrabold uppercase tracking-wide">Central de Proxies</h2>
+        <div className="tile p-3 sm:p-4">
+          <ProxyCenterSection accounts={data?.accounts} onAccountsChanged={load} />
         </div>
       </Reveal>
 
