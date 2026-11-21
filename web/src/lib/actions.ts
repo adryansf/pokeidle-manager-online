@@ -166,12 +166,17 @@ export interface CapturesResponse {
 export type AutomationPatch = Partial<{
   autoCatch: boolean;
   autoPotion: boolean;
+  potionThreshold: number;
+  potionQty: number;
   autoBallRestock: boolean;
+  ballThreshold: number;
+  ballQty: number;
   autoPotionFallback: boolean;
   autoCenter: boolean;
   autoCenterHpPct: number;
   goldReserve: number;
   gameAutoPotion: boolean;
+  hpLimiarPct: number;
   pvpAuto: boolean;
 }>;
 

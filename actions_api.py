@@ -62,12 +62,17 @@ class BulkHuntIn(BaseModel):
 class AutomationPatchIn(BaseModel):
     autoCatch: bool | None = None
     autoPotion: bool | None = None
+    potionThreshold: int | None = None
+    potionQty: int | None = None
     autoBallRestock: bool | None = None
+    ballThreshold: int | None = None
+    ballQty: int | None = None
     autoPotionFallback: bool | None = None
     autoCenter: bool | None = None
     autoCenterHpPct: int | None = None
     goldReserve: int | None = None
     gameAutoPotion: bool | None = None
+    hpLimiarPct: int | None = None
     pvpAuto: bool | None = None
 
 
@@ -513,8 +518,20 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
             conn.balls.enabled = bool(body.autoCatch)
         if "autoPotion" in sent and body.autoPotion is not None:
             opts["auto_potion"] = acc_changes["auto_potion"] = bool(body.autoPotion)
+        if "potionThreshold" in sent and body.potionThreshold is not None:
+            v = min(max(int(body.potionThreshold), 0), 100000)
+            opts["potion_restock_threshold"] = acc_changes["potion_restock_threshold"] = v
+        if "potionQty" in sent and body.potionQty is not None:
+            v = min(max(int(body.potionQty), 1), 100000)
+            opts["potion_restock_qty"] = acc_changes["potion_restock_qty"] = v
         if "autoBallRestock" in sent and body.autoBallRestock is not None:
             opts["auto_ball_restock"] = acc_changes["auto_ball_restock"] = bool(body.autoBallRestock)
+        if "ballThreshold" in sent and body.ballThreshold is not None:
+            v = min(max(int(body.ballThreshold), 0), 100000)
+            opts["ball_restock_threshold"] = acc_changes["ball_restock_threshold"] = v
+        if "ballQty" in sent and body.ballQty is not None:
+            v = min(max(int(body.ballQty), 1), 100000)
+            opts["ball_restock_qty"] = acc_changes["ball_restock_qty"] = v
         if "autoPotionFallback" in sent and body.autoPotionFallback is not None:
             opts["auto_potion_fallback"] = acc_changes["auto_potion_fallback"] = bool(body.autoPotionFallback)
         if "autoCenter" in sent and body.autoCenter is not None:
@@ -530,15 +547,23 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
             conn.pvp.auto = bool(body.pvpAuto)
         if acc_changes:
             conn.acc = replace(conn.acc, **acc_changes)
-            if "auto_potion" in acc_changes or "auto_ball_restock" in acc_changes:
+            restock_keys = {"auto_potion", "potion_restock_threshold", "potion_restock_qty",
+                            "auto_ball_restock", "ball_restock_threshold", "ball_restock_qty"}
+            if restock_keys & acc_changes.keys():
                 conn.rebuild_restockers()
             store.update_account(acc_id, {"options": opts})
+        game_patch: dict = {}
         if "gameAutoPotion" in sent and body.gameAutoPotion is not None:
+            game_patch["autoPotion"] = bool(body.gameAutoPotion)
+        if "hpLimiarPct" in sent and body.hpLimiarPct is not None:
+            pct = min(max(int(body.hpLimiarPct), 10), 95)
+            game_patch["hpLimiar"] = round(pct / 100.0, 2)
+        if game_patch:
             if not conn.can_send:
                 return JSONResponse({"error": "conta offline para alterar a cura automática do jogo"}, status_code=409)
-            await conn.set_automation({"autoPotion": bool(body.gameAutoPotion)})
+            await conn.set_automation(game_patch)
             auto = conn.estado.setdefault("automation", {})
-            auto["autoPotion"] = bool(body.gameAutoPotion)
+            auto.update(game_patch)
         from telemetry import _automation_snapshot
         return {"ok": True, "automation": _automation_snapshot(conn)}
 

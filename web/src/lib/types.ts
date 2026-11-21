@@ -44,13 +44,18 @@ export interface TeamPokemon {
 export interface AccountAutomation {
   autoCatch: boolean;
   autoPotion: boolean;
+  potionThreshold: number;
+  potionQty: number;
   autoBallRestock: boolean;
+  ballThreshold: number;
+  ballQty: number;
   autoPotionFallback: boolean;
   autoCenter: boolean;
   autoCenterHpPct: number;
   goldReserve: number;
   gameAutoPotion: boolean;
   hpLimiar?: number | null;
+  hpLimiarPct?: number | null;
   pvpAuto: boolean;
 }
 

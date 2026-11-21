@@ -199,6 +199,39 @@ export function AccountDetailModal({
   const [tab, setTab] = useState<DetailTab>("geral");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const [autoDraft, setAutoDraft] = useState<{
+    hpLimiarPct: string;
+    potionThreshold: string;
+    potionQty: string;
+    ballThreshold: string;
+    ballQty: string;
+    goldReserve: string;
+    autoCenterHpPct: string;
+  }>({
+    hpLimiarPct: "40",
+    potionThreshold: "10",
+    potionQty: "100",
+    ballThreshold: "10",
+    ballQty: "100",
+    goldReserve: "0",
+    autoCenterHpPct: "20",
+  });
+
+  useEffect(() => {
+    if (!open || !acc?.automation) return;
+    const a = acc.automation;
+    setAutoDraft({
+      hpLimiarPct: String(a.hpLimiarPct ?? (a.hpLimiar != null ? Math.round(a.hpLimiar * 100) : 40)),
+      potionThreshold: String(a.potionThreshold ?? 10),
+      potionQty: String(a.potionQty ?? 100),
+      ballThreshold: String(a.ballThreshold ?? 10),
+      ballQty: String(a.ballQty ?? 100),
+      goldReserve: String(a.goldReserve ?? 0),
+      autoCenterHpPct: String(a.autoCenterHpPct ?? 20),
+    });
+    // Sincroniza quando abre o modal ou muda de conta
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, accId]);
 
   useEffect(() => {
     if (!open) return;
@@ -545,72 +578,202 @@ export function AccountDetailModal({
 
               {/* ABA 3: AUTOMAÇÃO */}
               {tab === "automacao" && (
-                <div className="space-y-2.5">
+                <div className="space-y-4">
                   <p className="text-xs text-mute">
                     Todas as alterações aqui são aplicadas <b>em tempo real</b> sem desconectar a conta.
                   </p>
                   {auto ? (
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <ToggleRow
-                        label="Captura automática"
-                        desc="Lança Pokébolas automaticamente nos selvagens derrotados."
-                        checked={auto.autoCatch}
-                        disabled={busyKey === "autoCatch"}
-                        onToggle={() => void toggleAuto("autoCatch", { autoCatch: !auto.autoCatch })}
-                      />
-                      <ToggleRow
-                        label="Cura automática no jogo"
-                        desc={`Usa a poção equipada quando HP baixa${auto.hpLimiar ? ` (${Math.round(auto.hpLimiar * 100)}%)` : ""}.`}
-                        checked={auto.gameAutoPotion}
-                        disabled={busyKey === "gameAutoPotion" || acc.status !== "online"}
-                        onToggle={() => void toggleAuto("gameAutoPotion", { gameAutoPotion: !auto.gameAutoPotion })}
-                      />
-                      <ToggleRow
-                        label="Autocompra de Poções"
-                        desc={
-                          auto.goldReserve > 0
-                            ? `Compra automaticamente respeitando reserva de ${fmtShort(auto.goldReserve)} Gold.`
-                            : "Repõe a poção equipada na loja quando o estoque baixar."
-                        }
-                        checked={auto.autoPotion}
-                        disabled={busyKey === "autoPotion"}
-                        onToggle={() => void toggleAuto("autoPotion", { autoPotion: !auto.autoPotion })}
-                      />
-                      <ToggleRow
-                        label="Autocompra de Pokébolas"
-                        desc={
-                          auto.goldReserve > 0
-                            ? `Compra automaticamente respeitando reserva de ${fmtShort(auto.goldReserve)} Gold.`
-                            : "Repõe a bola equipada na loja quando o estoque baixar."
-                        }
-                        checked={auto.autoBallRestock}
-                        disabled={busyKey === "autoBallRestock"}
-                        onToggle={() => void toggleAuto("autoBallRestock", { autoBallRestock: !auto.autoBallRestock })}
-                      />
-                      <ToggleRow
-                        label="Fallback automático de Poção"
-                        desc="Se a poção equipada zerar, troca para a próxima poção disponível na mochila."
-                        checked={auto.autoPotionFallback}
-                        disabled={busyKey === "autoPotionFallback"}
-                        onToggle={() =>
-                          void toggleAuto("autoPotionFallback", { autoPotionFallback: !auto.autoPotionFallback })
-                        }
-                      />
-                      <ToggleRow
-                        label={`Auto-Centro de emergência (≤${auto.autoCenterHpPct}% HP)`}
-                        desc="Vai ao Centro Pokémon se ficar sem poções e o HP cair demais."
-                        checked={auto.autoCenter}
-                        disabled={busyKey === "autoCenter"}
-                        onToggle={() => void toggleAuto("autoCenter", { autoCenter: !auto.autoCenter })}
-                      />
-                      <ToggleRow
-                        label="PVP Ranqueado automático"
-                        desc="Entra automaticamente na fila do PVP ranqueado."
-                        checked={auto.pvpAuto}
-                        disabled={busyKey === "pvpAuto"}
-                        onToggle={() => void toggleAuto("pvpAuto", { pvpAuto: !auto.pvpAuto })}
-                      />
-                    </div>
+                    <>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <ToggleRow
+                          label="Captura automática"
+                          desc="Lança Pokébolas automaticamente nos selvagens derrotados (não precisa de VIP)."
+                          checked={auto.autoCatch}
+                          disabled={busyKey === "autoCatch"}
+                          onToggle={() => void toggleAuto("autoCatch", { autoCatch: !auto.autoCatch })}
+                        />
+                        <ToggleRow
+                          label={`Cura automática no jogo (≤ ${auto.hpLimiarPct ?? 40}% HP)`}
+                          desc="Usa a poção equipada automaticamente quando o HP cair abaixo da % definida."
+                          checked={auto.gameAutoPotion}
+                          disabled={busyKey === "gameAutoPotion" || acc.status !== "online"}
+                          onToggle={() => void toggleAuto("gameAutoPotion", { gameAutoPotion: !auto.gameAutoPotion })}
+                        />
+                        <ToggleRow
+                          label={`Autocompra de Poções (< ${auto.potionThreshold} → +${auto.potionQty})`}
+                          desc={`Compra ${auto.potionQty} un. quando o estoque ficar abaixo de ${auto.potionThreshold}${auto.goldReserve > 0 ? ` · piso ${fmtShort(auto.goldReserve)}g` : ""}.`}
+                          checked={auto.autoPotion}
+                          disabled={busyKey === "autoPotion"}
+                          onToggle={() => void toggleAuto("autoPotion", { autoPotion: !auto.autoPotion })}
+                        />
+                        <ToggleRow
+                          label={`Autocompra de Pokébolas (< ${auto.ballThreshold} → +${auto.ballQty})`}
+                          desc={`Compra ${auto.ballQty} un. quando o estoque ficar abaixo de ${auto.ballThreshold}${auto.goldReserve > 0 ? ` · piso ${fmtShort(auto.goldReserve)}g` : ""}.`}
+                          checked={auto.autoBallRestock}
+                          disabled={busyKey === "autoBallRestock"}
+                          onToggle={() => void toggleAuto("autoBallRestock", { autoBallRestock: !auto.autoBallRestock })}
+                        />
+                        <ToggleRow
+                          label="Fallback automático de Poção"
+                          desc="Se a poção equipada zerar, troca para a próxima poção disponível na mochila."
+                          checked={auto.autoPotionFallback}
+                          disabled={busyKey === "autoPotionFallback"}
+                          onToggle={() =>
+                            void toggleAuto("autoPotionFallback", { autoPotionFallback: !auto.autoPotionFallback })
+                          }
+                        />
+                        <ToggleRow
+                          label={`Auto-Centro de emergência (≤ ${auto.autoCenterHpPct}% HP)`}
+                          desc="Vai ao Centro Pokémon se ficar sem poções e o HP cair demais."
+                          checked={auto.autoCenter}
+                          disabled={busyKey === "autoCenter"}
+                          onToggle={() => void toggleAuto("autoCenter", { autoCenter: !auto.autoCenter })}
+                        />
+                        <ToggleRow
+                          label="PVP Ranqueado automático"
+                          desc="Entra automaticamente na fila do PVP ranqueado."
+                          checked={auto.pvpAuto}
+                          disabled={busyKey === "pvpAuto"}
+                          onToggle={() => void toggleAuto("pvpAuto", { pvpAuto: !auto.pvpAuto })}
+                        />
+                      </div>
+
+                      {/* Ajuste numérico de % de cura e quantidades de recompra */}
+                      <div className="space-y-3 rounded-xl border border-edge/60 bg-void/50 p-3.5">
+                        <h3 className="text-xs font-bold uppercase tracking-wide text-poke-gold">
+                          Limiares & Quantidades (aplica em tempo real)
+                        </h3>
+
+                        {/* % da cura automática do jogo */}
+                        <div className="space-y-1.5 rounded-lg border border-line bg-tile p-3">
+                          <div className="flex items-center justify-between gap-2 text-xs">
+                            <span className="font-bold text-fg">Usar poção quando HP ficar abaixo de:</span>
+                            <span className="tnum rounded bg-void px-2 py-0.5 text-sm font-extrabold text-poke-green">
+                              {autoDraft.hpLimiarPct}%
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="range"
+                              min={10}
+                              max={95}
+                              step={5}
+                              value={Math.min(95, Math.max(10, Number(autoDraft.hpLimiarPct || 40)))}
+                              onChange={(e) => setAutoDraft({ ...autoDraft, hpLimiarPct: e.target.value })}
+                              className="flex-1 accent-[#f3c04a]"
+                            />
+                            <input
+                              type="number"
+                              min={10}
+                              max={95}
+                              value={autoDraft.hpLimiarPct}
+                              onChange={(e) => setAutoDraft({ ...autoDraft, hpLimiarPct: e.target.value.replace(/\D/g, "") })}
+                              className="field w-20 text-center text-sm font-bold"
+                            />
+                          </div>
+                          <p className="text-[11px] text-mute">
+                            Controla o gatilho oficial de cura do jogo (<code>hpLimiar</code>, de 10% a 95%).
+                          </p>
+                        </div>
+
+                        {/* Quantidades de Poção, Bola, Piso de Ouro e Auto-Centro */}
+                        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-bold text-mute">Poção: repor abaixo de</span>
+                            <input
+                              className="field w-full text-sm"
+                              inputMode="numeric"
+                              value={autoDraft.potionThreshold}
+                              onChange={(e) => setAutoDraft({ ...autoDraft, potionThreshold: e.target.value.replace(/\D/g, "") })}
+                            />
+                          </label>
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-bold text-mute">Poção: comprar qtd</span>
+                            <input
+                              className="field w-full text-sm"
+                              inputMode="numeric"
+                              value={autoDraft.potionQty}
+                              onChange={(e) => setAutoDraft({ ...autoDraft, potionQty: e.target.value.replace(/\D/g, "") })}
+                            />
+                          </label>
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-bold text-mute">Auto-Centro (% HP)</span>
+                            <input
+                              className="field w-full text-sm"
+                              inputMode="numeric"
+                              value={autoDraft.autoCenterHpPct}
+                              onChange={(e) => setAutoDraft({ ...autoDraft, autoCenterHpPct: e.target.value.replace(/\D/g, "") })}
+                            />
+                          </label>
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-bold text-mute">Bola: repor abaixo de</span>
+                            <input
+                              className="field w-full text-sm"
+                              inputMode="numeric"
+                              value={autoDraft.ballThreshold}
+                              onChange={(e) => setAutoDraft({ ...autoDraft, ballThreshold: e.target.value.replace(/\D/g, "") })}
+                            />
+                          </label>
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-bold text-mute">Bola: comprar qtd</span>
+                            <input
+                              className="field w-full text-sm"
+                              inputMode="numeric"
+                              value={autoDraft.ballQty}
+                              onChange={(e) => setAutoDraft({ ...autoDraft, ballQty: e.target.value.replace(/\D/g, "") })}
+                            />
+                          </label>
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-bold text-mute">Reserva mín. de Gold</span>
+                            <input
+                              className="field w-full text-sm"
+                              inputMode="numeric"
+                              value={autoDraft.goldReserve}
+                              onChange={(e) => setAutoDraft({ ...autoDraft, goldReserve: e.target.value.replace(/\D/g, "") })}
+                            />
+                          </label>
+                        </div>
+
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            disabled={busyKey === "saveNums"}
+                            onClick={async () => {
+                              setBusyKey("saveNums");
+                              setMsg(null);
+                              try {
+                                const patch: AutomationPatch = {
+                                  potionThreshold: Number(autoDraft.potionThreshold || 10),
+                                  potionQty: Math.max(1, Number(autoDraft.potionQty || 100)),
+                                  ballThreshold: Number(autoDraft.ballThreshold || 10),
+                                  ballQty: Math.max(1, Number(autoDraft.ballQty || 100)),
+                                  goldReserve: Number(autoDraft.goldReserve || 0),
+                                  autoCenterHpPct: Math.min(80, Math.max(5, Number(autoDraft.autoCenterHpPct || 20))),
+                                  ...(acc.status === "online"
+                                    ? { hpLimiarPct: Math.min(95, Math.max(10, Number(autoDraft.hpLimiarPct || 40))) }
+                                    : {}),
+                                };
+                                await actions.setAutomation(accId, patch);
+                                setMsg({
+                                  tone: "ok",
+                                  text:
+                                    acc.status === "online"
+                                      ? "Limiares, % de cura e quantidades aplicados em tempo real!"
+                                      : "Quantidades salvas! (A % de cura no jogo só pode ser enviada quando a conta estiver online.)",
+                                });
+                              } catch (e) {
+                                setMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao salvar parâmetros" });
+                              } finally {
+                                setBusyKey(null);
+                              }
+                            }}
+                            className="btn border-0 bg-poke-gold px-4 py-1.5 text-xs font-bold text-void hover:bg-[#f6ca5e]"
+                          >
+                            {busyKey === "saveNums" ? "Aplicando…" : "Salvar parâmetros"}
+                          </button>
+                        </div>
+                      </div>
+                    </>
                   ) : (
                     <p className="text-xs text-mute">Dados de automação indisponíveis.</p>
                   )}

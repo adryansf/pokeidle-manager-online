@@ -765,9 +765,31 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
           {(
             [
               ["autoCatch", "Captura", acc.automation.autoCatch, { autoCatch: !acc.automation.autoCatch }, "Captura automática de selvagens"],
-              ["gameAutoPotion", "Cura", acc.automation.gameAutoPotion, { gameAutoPotion: !acc.automation.gameAutoPotion }, "Cura automática do jogo"],
-              ["autoPotion", "Auto-Poção", acc.automation.autoPotion, { autoPotion: !acc.automation.autoPotion }, "Autocompra de poções na loja"],
-              ["autoBallRestock", "Auto-Bola", acc.automation.autoBallRestock, { autoBallRestock: !acc.automation.autoBallRestock }, "Autocompra de Pokébolas na loja"],
+              [
+                "gameAutoPotion",
+                acc.automation.hpLimiarPct != null ? `Cura ≤${acc.automation.hpLimiarPct}%` : "Cura",
+                acc.automation.gameAutoPotion,
+                { gameAutoPotion: !acc.automation.gameAutoPotion },
+                `Cura automática do jogo (usa a poção equipada quando HP ≤ ${acc.automation.hpLimiarPct ?? 40}%). Abra Detalhes → Automação para ajustar a %.`,
+              ],
+              [
+                "autoPotion",
+                acc.automation.autoPotion
+                  ? `Auto-Poção (<${acc.automation.potionThreshold}→+${acc.automation.potionQty})`
+                  : "Auto-Poção",
+                acc.automation.autoPotion,
+                { autoPotion: !acc.automation.autoPotion },
+                `Autocompra de poções: compra ${acc.automation.potionQty} un. quando estoque ficar abaixo de ${acc.automation.potionThreshold}${acc.automation.goldReserve > 0 ? ` (piso ${fmtShort(acc.automation.goldReserve)}g)` : ""}.`,
+              ],
+              [
+                "autoBallRestock",
+                acc.automation.autoBallRestock
+                  ? `Auto-Bola (<${acc.automation.ballThreshold}→+${acc.automation.ballQty})`
+                  : "Auto-Bola",
+                acc.automation.autoBallRestock,
+                { autoBallRestock: !acc.automation.autoBallRestock },
+                `Autocompra de Pokébolas: compra ${acc.automation.ballQty} un. quando estoque ficar abaixo de ${acc.automation.ballThreshold}${acc.automation.goldReserve > 0 ? ` (piso ${fmtShort(acc.automation.goldReserve)}g)` : ""}.`,
+              ],
               ["autoPotionFallback", "Fallback", acc.automation.autoPotionFallback, { autoPotionFallback: !acc.automation.autoPotionFallback }, "Trocar para próxima poção disponível se zerar"],
               ["autoCenter", `Centro ≤${acc.automation.autoCenterHpPct}%`, acc.automation.autoCenter, { autoCenter: !acc.automation.autoCenter }, "Auto-Centro Pokémon de emergência sem poções"],
             ] as [string, string, boolean, AutomationPatch, string][]

@@ -16,7 +16,7 @@ export function startMock(emit: (m: SnapshotMessage) => void, setState: (s: Conn
       { id: 3289971 + i, speciesId: 248, name: "Tyranitar", level: 420, hp: 900, maxHp: 900, looktype: 60248, shiny: i === 0, slot: 1, active: false, quality: 1.55, potency: 2, grade: 4.8, ivTotal: 144 },
       { id: 3289981 + i, speciesId: 212, name: "Scizor", level: 390, hp: 750, maxHp: 800, looktype: 60212, shiny: false, slot: 2, active: false, quality: 1.4, potency: 2, grade: 4.1, ivTotal: 138 },
     ],
-    automation: { autoCatch: true, autoPotion: false, autoBallRestock: false, autoPotionFallback: true, autoCenter: true, autoCenterHpPct: 20, goldReserve: 0, gameAutoPotion: true, hpLimiar: 0.4, pvpAuto: false },
+    automation: { autoCatch: true, autoPotion: false, potionThreshold: 10, potionQty: 100, autoBallRestock: false, ballThreshold: 10, ballQty: 100, autoPotionFallback: true, autoCenter: true, autoCenterHpPct: 20, goldReserve: 0, gameAutoPotion: true, hpLimiar: 0.4, hpLimiarPct: 40, pvpAuto: false },
     xp: { atual: 52_000_000_000 + i * 3e9, nivel: 51_700_000_000 + i * 3e9, proximo: 52_150_000_000 + i * 3e9 },
     pass: [{ ultimo: D - 1, degrau: 6, total: 5, vipAte: 0, ciclos: 0, vipPegos: 0 }, { ultimo: D, degrau: 12, total: 40, vipAte: Date.now() + 9 * 86_400_000, ciclos: 1, vipPegos: 0b11111111111, ultimoVip: D }, { ultimo: D - 3, degrau: 3, total: 3, vipAte: 0, ciclos: 0, vipPegos: 0 }, null][i],
     map: [{ region: "outland", label: "Outland 2", outland: { tier: 2, label: "Outland 2", mult: 1.25 } }, { region: "hoenn", label: "Hoenn", outland: null }, { region: "kanto", label: "Kanto", outland: null }, { region: "outland", label: "Outland 1", outland: { tier: 1, label: "Outland 1", mult: 1 } }][i],
@@ -453,7 +453,12 @@ function installMockApi(accs: AccountSnapshot[]) {
       await wait();
       const a = accs[Number(m[1]) - 1];
       const patch = JSON.parse(String(init.body));
-      a.automation = { ...(a.automation as NonNullable<AccountSnapshot["automation"]>), ...patch };
+      const cur = a.automation as NonNullable<AccountSnapshot["automation"]>;
+      a.automation = {
+        ...cur,
+        ...patch,
+        ...(patch.hpLimiarPct != null ? { hpLimiar: patch.hpLimiarPct / 100, hpLimiarPct: patch.hpLimiarPct } : {}),
+      };
       return json({ ok: true, automation: a.automation });
     }
     if (path === "/api/captures") {

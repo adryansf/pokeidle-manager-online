@@ -243,16 +243,26 @@ def _team_snapshot(c: "AccountConnection") -> list[dict]:
 
 def _automation_snapshot(c: "AccountConnection") -> dict:
     auto = c.estado.get("automation") or {}
+    raw_limiar = auto.get("hpLimiar")
+    try:
+        hp_limiar_pct = round(float(raw_limiar) * 100) if raw_limiar is not None else None
+    except (TypeError, ValueError):
+        hp_limiar_pct = None
     return {
         "autoCatch": bool(c.balls.enabled),
         "autoPotion": bool(c.acc.auto_potion),
+        "potionThreshold": int(c.acc.potion_restock_threshold),
+        "potionQty": int(c.acc.potion_restock_qty),
         "autoBallRestock": bool(c.acc.auto_ball_restock),
+        "ballThreshold": int(c.acc.ball_restock_threshold),
+        "ballQty": int(c.acc.ball_restock_qty),
         "autoPotionFallback": bool(c.acc.auto_potion_fallback),
         "autoCenter": bool(c.acc.auto_center),
         "autoCenterHpPct": int(c.acc.auto_center_hp_pct),
         "goldReserve": int(c.acc.gold_reserve),
         "gameAutoPotion": bool(auto.get("autoPotion", True)),
-        "hpLimiar": auto.get("hpLimiar"),
+        "hpLimiar": raw_limiar,
+        "hpLimiarPct": hp_limiar_pct,
         "pvpAuto": bool(c.pvp.auto),
     }
 
