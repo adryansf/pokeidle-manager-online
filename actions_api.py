@@ -46,6 +46,15 @@ class PauseIn(BaseModel):
     paused: bool | None = None
 
 
+class FarmPauseIn(BaseModel):
+    paused: bool | None = None
+    force: Literal["rope", "forfeit"] | None = None
+
+
+class CenterIn(BaseModel):
+    force: Literal["rope", "forfeit"] | None = None
+
+
 class BulkPauseIn(BaseModel):
     paused: bool
 
@@ -75,6 +84,7 @@ class AutomationPatchIn(BaseModel):
     autoBestHunt: bool | None = None
     autoBestHuntRegion: str | None = None
     gameAutoPotion: bool | None = None
+    autoVoltarHunt: bool | None = None
     hpLimiarPct: int | None = None
     pvpAuto: bool | None = None
 
@@ -313,11 +323,25 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
         pk = conn.hunt.active_pokemon()
         if not pk or not isinstance(pk.get("stats"), dict) or not isinstance(pk.get("ivs"), dict):
             return JSONResponse({"error": "A conta não tem um Pokémon equipado com ficha completa."}, status_code=409)
+        est = conn.estado
+        level = int(est.get("level") or 1)
+        auto = est.get("automation") or {}
+        loja = est.get("loja") or {}
+        dia = est.get("diaSazonal") or {}
+        alvo_atrasados = int(loja.get("alvoAtrasados") or 0)
+        ball_ids = [i for i in (auto.get("ballIds") or []) if isinstance(i, int)]
+        ball_id = ball_ids[0] if ball_ids else conn.acc.ball_id
         return {
             "id": pk.get("id"), "speciesId": pk.get("speciesId"), "nome": pk.get("nome"), "looktype": pk.get("looktype"),
             "level": pk.get("level") or 1, "shiny": bool(pk.get("shiny")), "quality": pk.get("quality"),
-            "potencia": pk.get("potencia") or 1, "stats": pk["stats"], "ivs": pk["ivs"], "tmAoe": bool(pk.get("tmAoe")),
-            "trainerLevel": conn.estado.get("level") or 1,
+            "potencia": pk.get("potencia") or 1, "stats": pk["stats"], "ivs": pk["ivs"],
+            "refino": pk.get("refino") if isinstance(pk.get("refino"), dict) else {},
+            "tmAoe": bool(pk.get("tmAoe")),
+            "trainerLevel": level,
+            "tipoDoDia": dia.get("tipo") if isinstance(dia, dict) else None,
+            "escudo": bool(alvo_atrasados > 0 and level < alvo_atrasados),
+            "ballId": ball_id,
+            "comPocao": bool(auto.get("autoPotion", True)),
         }
 
     @app.post("/api/session/reset")
@@ -465,6 +489,10 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
             "nick": conn.acc.nick,
             "state": conn.state.value,
             "paused": conn.manual_paused or conn.state == State.PAUSED_MANUAL,
+            "farmPaused": bool(conn.farm_paused),
+            "farmPausePending": bool(conn._farm_pause_pending_center),
+            "location": conn.current_location(),
+            "escapeRopes": int((conn.estado.get("items") or {}).get("70010", 0) or 0),
             "lastReason": conn.last_reason,
             "combatLockMs": conn.combat_lock_ms(),
             "hunt": {
@@ -488,16 +516,23 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
         }
 
     @app.post("/api/accounts/{acc_id}/farm-pause")
-    async def toggle_farm_pause(acc_id: int, request: Request, body: PauseIn | None = None,
+    async def toggle_farm_pause(acc_id: int, request: Request, body: FarmPauseIn | None = None,
                                 tok: str | None = Query(None, alias="token")):
-        """Pausa/retoma o farm mantendo a conta ONLINE (envia ao Centro Pokémon e fica parada lá)."""
+        """Pausa/retoma o farm mantendo a conta ONLINE (desliga autoVoltarHunt, envia ao Centro e fica parada lá)."""
         if (r := guard(request, tok)):
             return r
         conn = conn_of(acc_id)
         if conn is None:
             return JSONResponse({"error": "conta não encontrada ou desligada"}, status_code=404)
-        target = (not conn.farm_paused) if (body is None or body.paused is None) else bool(body.paused)
-        return await conn.set_farm_pause(target)
+        force = body.force if body else None
+        if force is not None:
+            target = True
+        else:
+            target = (not conn.farm_paused) if (body is None or body.paused is None) else bool(body.paused)
+        try:
+            return await conn.set_farm_pause(target, force=force)
+        except RuntimeError as e:
+            return JSONResponse({"error": str(e)}, status_code=409)
 
     @app.post("/api/bulk/farm-pause")
     async def bulk_farm_pause(body: BulkPauseIn, request: Request, tok: str | None = Query(None, alias="token")):
@@ -510,8 +545,9 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
         return {"ok": True, "farmPaused": body.paused, "count": len(conns)}
 
     @app.post("/api/accounts/{acc_id}/center")
-    async def go_center(acc_id: int, request: Request, tok: str | None = Query(None, alias="token")):
-        """Envia a conta ao Centro Pokémon (centro.ir)."""
+    async def go_center(acc_id: int, request: Request, body: CenterIn | None = None,
+                        tok: str | None = Query(None, alias="token")):
+        """Envia a conta ao Centro Pokémon (`centro.ir`, Escape Rope ou `centro.desistir`)."""
         if (r := guard(request, tok)):
             return r
         conn = conn_of(acc_id)
@@ -519,6 +555,18 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
             return JSONResponse({"error": "conta não encontrada ou desligada"}, status_code=404)
         if not conn.can_send:
             return JSONResponse({"error": "conta offline no momento"}, status_code=409)
+        force = body.force if body else None
+        if force == "rope":
+            ropes = int((conn.estado.get("items") or {}).get("70010", 0) or 0)
+            if ropes <= 0:
+                return JSONResponse({"error": "A conta não tem Escape Rope na mochila."}, status_code=409)
+            await conn.hunt.use_escape_rope()
+            conn.hunt._push_live_event("center", name=conn.acc.nick, manual=True, method="rope")
+            return {"ok": True, "method": "rope"}
+        if force == "forfeit":
+            await conn.hunt.forfeit_combat()
+            conn.hunt._push_live_event("center", name=conn.acc.nick, manual=True, method="forfeit")
+            return {"ok": True, "method": "forfeit"}
         lock = conn.combat_lock_ms()
         if lock > 0:
             return JSONResponse({"error": f"Em combate — aguarde {int((lock + 999) // 1000)}s para ir ao Centro."}, status_code=409)
@@ -601,6 +649,8 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
         game_patch: dict = {}
         if "gameAutoPotion" in sent and body.gameAutoPotion is not None:
             game_patch["autoPotion"] = bool(body.gameAutoPotion)
+        if "autoVoltarHunt" in sent and body.autoVoltarHunt is not None:
+            game_patch["autoVoltarHunt"] = bool(body.autoVoltarHunt)
         if "hpLimiarPct" in sent and body.hpLimiarPct is not None:
             pct = min(max(int(body.hpLimiarPct), 10), 95)
             game_patch["hpLimiar"] = round(pct / 100.0, 2)

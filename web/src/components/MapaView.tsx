@@ -6,7 +6,7 @@ import { HuntRow, TypeChip } from "@/components/HuntRow";
 import { PokemonSprite } from "@/components/Sprites";
 import { Reveal } from "@/components/ui";
 import { actions, useCreatures, useHuntCatalog, type Creature, type Hunt, type OutlandTier } from "@/lib/actions";
-import { type HuntOrder, rankLines, useBestHunts } from "@/lib/huntAdvisor";
+import { type HuntOrder, type HuntSimOptions, rankLines, useBestHunts } from "@/lib/huntAdvisor";
 import { inRegion, REGIONS, regionOfHunt } from "@/lib/regions";
 import { useAccountIds, useAccountsMap } from "@/lib/telemetry";
 import { effectiveness, matchup, TYPE_COLOR, TYPES } from "@/lib/typeChart";
@@ -169,14 +169,18 @@ export function MapaView() {
   const [focus, setFocus] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>(null);
   const [order, setOrder] = useState<HuntOrder>("xp");
+  const [simOptions, setSimOptions] = useState<HuntSimOptions>({});
+  const patchSimOptions = useCallback((patch: Partial<HuntSimOptions>) => {
+    setSimOptions((prev) => ({ ...prev, ...patch }));
+  }, []);
   const [tierMsg, setTierMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [tierBusy, setTierBusy] = useState(false);
 
   const level = acc?.level ?? cat?.level ?? 0;
-  const currentSlug = acc?.hunt?.slug ?? cat?.current ?? null;
+  const currentSlug = acc?.location?.inCenter ? null : (acc?.hunt?.slug ?? cat?.current ?? null);
   const online = acc?.status === "online";
   // Melhor hunt para o Pokémon equipado: recalcula quando ele (ou o nível) muda.
-  const best = useBestHunts(selected || null, `${acc?.pokemon?.name}|${acc?.pokemon?.level}|${acc?.level}`, online);
+  const best = useBestHunts(selected || null, `${acc?.pokemon?.name}|${acc?.pokemon?.level}|${acc?.level}`, online, simOptions);
   const rankBySlug = useMemo(() => new Map(rankLines(best.data?.lines, order).slice(0, 3).map((l, i) => [l.slug, i + 1] as const)), [best.data, order]);
 
   // Região inicial: a da hunt atual da conta (ou Kanto). As dez regiões do jogo ficam sempre à vista.
@@ -300,6 +304,7 @@ export function MapaView() {
                 data-active={on}
                 onClick={() => {
                   setPicked(id);
+                  setSimOptions({});
                   setStatus(null);
                   setTierMsg(null);
                   setFocus(null);
@@ -312,7 +317,15 @@ export function MapaView() {
           })}
           {acc && (
             <span className="ml-auto text-sm text-mute">
-              Caçando em <b className="font-semibold text-fg">{acc.huntName ?? cat?.hunts.find((h) => h.slug === currentSlug)?.nome ?? "—"}</b>
+              {acc.location && !acc.location.inHunt ? (
+                <>
+                  Local atual: <b className={`font-semibold ${acc.location.inCenter ? "text-poke-green" : "text-fg"}`}>{acc.location.label}</b>
+                </>
+              ) : (
+                <>
+                  Caçando em <b className="font-semibold text-fg">{acc.huntName ?? cat?.hunts.find((h) => h.slug === currentSlug)?.nome ?? "—"}</b>
+                </>
+              )}
             </span>
           )}
         </div>
@@ -329,6 +342,8 @@ export function MapaView() {
           nick={acc?.nick ?? ""}
           order={order}
           onOrder={setOrder}
+          simOptions={simOptions}
+          onSimOptions={patchSimOptions}
           best={best.data}
           loading={best.loading}
           error={best.error}

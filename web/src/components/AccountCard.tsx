@@ -15,7 +15,7 @@ import type { EquippedItem } from "@/lib/types";
 import { type CardStyle, useCardStyle } from "@/lib/cardStyle";
 import { dragState, justDragged } from "@/lib/useCardOrder";
 import { fmtDuration, fmtShort } from "@/lib/utils";
-import type { MapInfo, ProxyBadgeInfo } from "@/lib/types";
+import type { AccountLocation, MapInfo, ProxyBadgeInfo } from "@/lib/types";
 
 export type CardMode = "resumo" | "sessao";
 
@@ -97,6 +97,31 @@ function Tile({
       <div className="min-w-0 truncate text-sm font-bold leading-tight sm:text-lg">{children}</div>
     </motion.div>
   );
+}
+
+/** Mapa ou local atual da conta (Centro Pokémon, Arena de Boss, Safari, Casa, ou o Mapa da Hunt). */
+function LocationChip({ location, map }: { location?: AccountLocation | null; map?: MapInfo | null }) {
+  if (location && location.kind !== "hunt") {
+    const styles: Record<string, { icon: string; cls: string }> = {
+      center: { icon: "🏥", cls: "border-[#2f6b3a] bg-[#16301c] text-poke-green" },
+      boss: { icon: "⚔️", cls: "border-[#7a2f27] bg-[#32140f] text-poke-red" },
+      safari: { icon: "🌿", cls: "border-[#2f6b3a] bg-[#16301c] text-poke-green" },
+      house: { icon: "🏠", cls: "border-edge/60 bg-tile text-fg" },
+      mythic: { icon: "✨", cls: "border-poke-gold/70 bg-[#33260e] text-poke-gold" },
+      idle: { icon: "⏸", cls: "border-line bg-void text-mute" },
+    };
+    const st = styles[location.kind] ?? { icon: "📍", cls: "border-line bg-void text-fg" };
+    return (
+      <span
+        className={`inline-flex max-w-full shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs font-bold leading-none sm:text-sm ${st.cls}`}
+        title={`Local atual: ${location.label}${location.detail ? ` (${location.detail})` : ""}`}
+      >
+        <span aria-hidden>{st.icon}</span>
+        <span className="truncate">{location.label}</span>
+      </span>
+    );
+  }
+  return <MapChip map={map} />;
 }
 
 /** Mapa onde a conta caça. Em Outland mostra o nível dela e o multiplicador de itens raros (como no jogo). */
@@ -582,12 +607,14 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
                   <span className="ml-1.5 rounded bg-poke-gold px-1 py-0.5 align-middle text-[9px] font-black leading-none text-void sm:ml-2 sm:px-1.5 sm:text-[10px]">VIP</span>
                 )}
               </h3>
-              <MapChip map={acc.map} />
+              <LocationChip location={acc.location} map={acc.map} />
               <ProxyChip proxy={acc.proxy} />
               <span className="flex min-w-0 items-center gap-1.5 text-sm text-mute sm:hidden">
                 <Crosshair className="size-4 shrink-0 text-poke-gold" aria-hidden />
-                <span className="sr-only">Hunt atual: </span>
-                <b className="truncate font-semibold text-fg">{acc.huntName ?? prettySlug(acc.hunt?.slug)}</b>
+                <span className="sr-only">Local atual: </span>
+                <b className="truncate font-semibold text-fg">
+                  {acc.location && !acc.location.inHunt ? acc.location.label : (acc.huntName ?? prettySlug(acc.hunt?.slug))}
+                </b>
               </span>
             </div>
             <div className="flex shrink-0 items-center gap-1">
@@ -701,24 +728,69 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
       )}
 
       {acc.farmPaused && !acc.paused && (
-        <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-[#7a5a1c] bg-[#33260e]/70 px-2.5 py-1.5 text-xs text-poke-gold">
-          <span className="truncate">
-            🏥 {acc.farmPausePending ? "Aguardando fim do combate para ir ao Pokécentro…" : "Farm pausado no Pokécentro — conta online sem caçar."}
+        <div
+          className={`mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${
+            acc.location?.inCenter && !acc.farmPausePending
+              ? "border-[#2f6b3a] bg-[#16301c]/70 text-poke-green"
+              : "border-[#7a5a1c] bg-[#33260e]/70 text-poke-gold"
+          }`}
+        >
+          <span className="min-w-0 flex-1 truncate">
+            {acc.location?.inCenter && !acc.farmPausePending
+              ? "🏥 No Centro Pokémon — farm pausado (conta online sem caçar)."
+              : "⏳ Aguardando fim do combate para ir ao Pokécentro (auto-voltar desligado)…"}
           </span>
-          <button
-            type="button"
-            disabled={autoBusy === "farmPause"}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (autoBusy) return;
-              setAutoBusy("farmPause");
-              void actions.farmPause(id, false).finally(() => setAutoBusy(null));
-            }}
-            className="shrink-0 rounded border border-[#2f6b3a] bg-[#16301c] px-2 py-0.5 text-[11px] font-bold text-poke-green hover:bg-[#1e4226] disabled:opacity-50"
-          >
-            Retomar farm
-          </button>
+          <div className="flex shrink-0 flex-wrap items-center gap-1">
+            {acc.farmPausePending && !acc.location?.inCenter && (acc.escapeRopes ?? 0) > 0 && (
+              <button
+                type="button"
+                disabled={autoBusy === "farmPause"}
+                title="Usa 1 Escape Rope para ir ao Centro Pokémon imediatamente sem perder XP"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (autoBusy) return;
+                  setAutoBusy("farmPause");
+                  void actions.farmPause(id, true, "rope").finally(() => setAutoBusy(null));
+                }}
+                className="rounded border border-edge bg-tile px-2 py-0.5 text-[11px] font-bold text-fg hover:border-poke-gold hover:text-poke-gold disabled:opacity-50"
+              >
+                🪢 Rope (×{acc.escapeRopes})
+              </button>
+            )}
+            {acc.farmPausePending && !acc.location?.inCenter && (
+              <button
+                type="button"
+                disabled={autoBusy === "farmPause"}
+                title="Desistir do combate (centro.desistir): vai ao Pokécentro imediatamente (pode perder até 10% do XP do nível atual, ou 0% no Boost dos Atrasados)"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (autoBusy) return;
+                  if (!window.confirm(`Desistir do combate em ${acc.nick} e ir ao Centro Pokémon imediatamente?\n\nAviso do jogo: desistir em combate pode custar até 10% do XP do nível atual (0% se estiver no Boost dos Atrasados).`)) return;
+                  setAutoBusy("farmPause");
+                  void actions.farmPause(id, true, "forfeit").finally(() => setAutoBusy(null));
+                }}
+                className="rounded border border-[#7a2f27] bg-[#32140f] px-2 py-0.5 text-[11px] font-bold text-poke-red hover:bg-[#461c15] disabled:opacity-50"
+              >
+                🏳️ Sair agora
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={autoBusy === "farmPause"}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (autoBusy) return;
+                setAutoBusy("farmPause");
+                void actions.farmPause(id, false).finally(() => setAutoBusy(null));
+              }}
+              className="rounded border border-[#2f6b3a] bg-[#16301c] px-2 py-0.5 text-[11px] font-bold text-poke-green hover:bg-[#1e4226] disabled:opacity-50"
+            >
+              Retomar farm
+            </button>
+          </div>
         </div>
       )}
 
@@ -865,9 +937,18 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
 
       <footer className="mt-2.5 hidden flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-line pt-2 text-sm text-mute sm:flex">
         <span className="truncate">
-          Hunt: <b className="font-semibold text-fg">{acc.huntName ?? prettySlug(acc.hunt?.slug)}</b>
-          {acc.hunt && <> · {fmtDuration(acc.hunt.minutes)}</>}
-          {acc.hunt && acc.hunt.kills > 0 && <> · <span className="tnum">{fmtShort(acc.hunt.kills)} abates</span></>}
+          {acc.location && !acc.location.inHunt ? (
+            <>
+              Local: <b className={`font-semibold ${acc.location.inCenter ? "text-poke-green" : "text-fg"}`}>{acc.location.label}</b>
+              {acc.location.detail && <> · {acc.location.detail}</>}
+            </>
+          ) : (
+            <>
+              Hunt: <b className="font-semibold text-fg">{acc.huntName ?? prettySlug(acc.hunt?.slug)}</b>
+              {acc.hunt && <> · {fmtDuration(acc.hunt.minutes)}</>}
+              {acc.hunt && acc.hunt.kills > 0 && <> · <span className="tnum">{fmtShort(acc.hunt.kills)} abates</span></>}
+            </>
+          )}
           {acc.huntPending && <span className="ml-1.5 text-poke-gold"> → {acc.huntPending.name} (na fila)</span>}
         </span>
         {acc.captured && (

@@ -33,21 +33,38 @@ export interface HuntCalc {
   sub: string;
   /** "one" = um golpe do selvagem pode matar; número = mortes por hora estimadas (só avisa a partir de 0,5). */
   risk?: "one" | number | null;
+  /** Fração do HP tirada pelo pior golpe do selvagem (0..1+). */
+  hitPct?: number | null;
 }
 
-function Risk({ risk }: { risk: HuntCalc["risk"] }) {
+function Risk({ risk, hitPct }: { risk: HuntCalc["risk"]; hitPct?: number | null }) {
   if (risk === "one")
     return (
       <span className="inline-flex items-center gap-1 rounded border border-[#7a2f27] bg-[#32140f] px-1.5 py-0.5 text-[10px] font-bold leading-none text-poke-red" title="Um golpe do selvagem pode tirar todo o HP do Pokémon">
-        <Skull className="size-3" aria-hidden /> pode morrer de 1 golpe
+        <Skull className="size-3" aria-hidden /> 1 hit
       </span>
     );
   if (typeof risk === "number" && risk >= 0.5)
     return (
-      <span className="inline-flex items-center gap-1 rounded border border-[#7a5a1c] bg-[#38290f] px-1.5 py-0.5 text-[10px] font-bold leading-none text-poke-gold" title="Mortes por hora estimadas">
-        <Skull className="size-3" aria-hidden /> ~{risk.toFixed(1)} mortes/h
+      <span className="inline-flex items-center gap-1 rounded border border-[#7a2f27] bg-[#32140f] px-1.5 py-0.5 text-[10px] font-bold leading-none text-poke-red" title="Mortes por hora estimadas">
+        <Skull className="size-3" aria-hidden /> ~{risk.toFixed(1)}/h
       </span>
     );
+  if (typeof hitPct === "number" && Number.isFinite(hitPct) && hitPct > 0) {
+    const pct = Math.round(hitPct * 100);
+    if (pct >= 50) {
+      return (
+        <span className="inline-flex items-center gap-1 rounded border border-[#7a5a1c] bg-[#38290f] px-1.5 py-0.5 text-[10px] font-bold leading-none text-poke-gold" title={`O pior golpe do selvagem tira ~${pct}% do HP`}>
+          ⚠ {pct}% HP
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 rounded border border-[#2f6b3a] bg-[#16301c] px-1.5 py-0.5 text-[10px] font-bold leading-none text-poke-green" title={`Segura: o pior golpe do selvagem tira ~${pct}% do HP`}>
+        ✓ {pct}% HP
+      </span>
+    );
+  }
   return null;
 }
 
@@ -153,7 +170,7 @@ export const HuntRow = memo(function HuntRow({
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-1">
           {types.length ? types.map((t) => <span key={t} className={locked ? "opacity-50 grayscale" : ""}><TypeChip type={t} /></span>) : <span className="text-xs text-mute">{h.especies.length} espécie(s)</span>}
-          {calc && <Risk risk={calc.risk} />}
+          {calc && <Risk risk={calc.risk} hitPct={calc.hitPct} />}
         </div>
         {calc && <p className="tnum mt-1 text-xs text-mute">{calc.sub}</p>}
       </div>

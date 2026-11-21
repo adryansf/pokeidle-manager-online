@@ -172,6 +172,9 @@ function formatLiveEvent(ev: LiveEvent): string {
     case "potion":
       return `🧪 Fallback de poção: trocou para ${ev.name || "outra poção"}${ev.qty ? ` (×${fmtShort(ev.qty)})` : ""}`;
     case "center":
+      if (ev.reason === "morte") return `🏥 Foi ao Centro Pokémon (Pokémon derrotado)`;
+      if (ev.reason === "desistencia") return `🏥 Foi ao Centro Pokémon (desistência do combate)`;
+      if (ev.reason === "vitoria") return `🏥 Retornou ao Centro Pokémon após vitória`;
       return ev.manual
         ? `🏥 Enviado ao Centro Pokémon pelo painel`
         : `🏥 Auto-Centro de emergência (${ev.name || "Pokémon"} com ${ev.hpPct ?? "?"}% HP)`;
@@ -242,11 +245,11 @@ export function LiveModal({ accId, open, onClose }: { accId: string; open: boole
     };
   }, [open, fetchLive]);
 
-  const sendToCenter = async () => {
+  const sendToCenter = async (force?: "rope" | "forfeit") => {
     setCenterBusy(true);
     setError(null);
     try {
-      await actions.goCenter(accId);
+      await actions.goCenter(accId, force);
       await fetchLive();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Não foi possível ir ao Centro Pokémon");
@@ -338,7 +341,13 @@ export function LiveModal({ accId, open, onClose }: { accId: string; open: boole
                     )}
                   </h2>
                   <p className="truncate text-xs text-mute">
-                    {live?.hunt ? (
+                    {(live?.location ?? acc?.location)?.inCenter ? (
+                      <span className="font-semibold text-poke-green">🏥 No Centro Pokémon (seguro, fora de combate)</span>
+                    ) : (live?.location ?? acc?.location) && !(live?.location ?? acc?.location)?.inHunt ? (
+                      <>
+                        Local: <b className="text-fg">{(live?.location ?? acc?.location)?.label}</b>
+                      </>
+                    ) : live?.hunt ? (
                       <>
                         Hunt <b className="text-fg">{live.hunt.name}</b>
                         {live.hunt.kills > 0 && <> · {fmtShort(live.hunt.kills)} abates</>}
@@ -353,7 +362,7 @@ export function LiveModal({ accId, open, onClose }: { accId: string; open: boole
 
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                 {acc && <StatusPill status={acc.status} />}
-                {isOnline && (
+                {isOnline && !(live?.location ?? acc?.location)?.inCenter && (
                   <button
                     type="button"
                     onClick={() => void sendToCenter()}

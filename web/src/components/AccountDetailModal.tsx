@@ -607,6 +607,13 @@ export function AccountDetailModal({
                           onToggle={() => void toggleAuto("gameAutoPotion", { gameAutoPotion: !auto.gameAutoPotion })}
                         />
                         <ToggleRow
+                          label="Voltar automático à hunt (jogo)"
+                          desc="Configuração nativa do servidor: ao morrer e curar no Centro Pokémon, volta automaticamente para a hunt. É desligada automaticamente ao usar Pausar farm."
+                          checked={Boolean(auto.autoVoltarHunt)}
+                          disabled={busyKey === "autoVoltarHunt" || acc.status !== "online"}
+                          onToggle={() => void toggleAuto("autoVoltarHunt", { autoVoltarHunt: !auto.autoVoltarHunt })}
+                        />
+                        <ToggleRow
                           label={`Autocompra de Poções (< ${auto.potionThreshold} → +${auto.potionQty})`}
                           desc={`Compra ${auto.potionQty} un. quando o estoque ficar abaixo de ${auto.potionThreshold}${auto.goldReserve > 0 ? ` · piso ${fmtShort(auto.goldReserve)}g` : ""}.`}
                           checked={auto.autoPotion}

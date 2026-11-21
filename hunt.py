@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 log = logging.getLogger("hunt")
 LIVE_EVENTS_MAX = 40
 LIVE_SLOT_TTL_S = 35.0
+ESCAPE_ROPE_ID = 70010
 
 
 @dataclass
@@ -78,6 +79,7 @@ class HuntManager:
         self.live_slots: dict[int, dict] = {}  # slot -> estado em tempo real para o Modo Live
         self.live_events: deque[dict] = deque(maxlen=LIVE_EVENTS_MAX)
         self.live_seq: int = 0
+        self.campo_map: str | None = None  # último mapa de campo.init (ex.: "centro", "hunt", "casa")
         self._ws = None  # setado por bind() a cada nova sessão de WebSocket
         self.on_kill = None  # callback(xp, gold) opcional, chamado a cada kill
 
@@ -106,6 +108,20 @@ class HuntManager:
             raise RuntimeError("HuntManager.bind(ws) não foi chamado")
         await self._ws.send(json.dumps({"t": "centro.ir"}))
         log.info("[%s] centro.ir enviado", self.account_name)
+
+    async def forfeit_combat(self) -> None:
+        """Cliente → Servidor: centro.desistir (sai imediatamente do combate para o Centro Pokémon)."""
+        if self._ws is None:
+            raise RuntimeError("HuntManager.bind(ws) não foi chamado")
+        await self._ws.send(json.dumps({"t": "centro.desistir"}))
+        log.info("[%s] centro.desistir enviado", self.account_name)
+
+    async def use_escape_rope(self) -> None:
+        """Cliente → Servidor: item.use Escape Rope (70010) — volta ao Centro imediatamente sem perder XP."""
+        if self._ws is None:
+            raise RuntimeError("HuntManager.bind(ws) não foi chamado")
+        await self._ws.send(json.dumps({"t": "item.use", "itemId": ESCAPE_ROPE_ID}))
+        log.info("[%s] item.use Escape Rope (%s) enviado", self.account_name, ESCAPE_ROPE_ID)
 
     # --------------------------------------------------------- bootstrap
     def on_welcome(self) -> None:
@@ -139,6 +155,15 @@ class HuntManager:
 
     def _handle_campo_init(self, msg: dict) -> None:
         """Se o servidor mandar lista inicial de selvagens em campo.init, pré-popula os slots do Modo Live."""
+        mapa = msg.get("mapa")
+        if isinstance(mapa, str) and mapa:
+            self.campo_map = mapa
+            if mapa == "centro":
+                self.estado["noCentro"] = True
+                self.live_slots.clear()
+                return
+            if mapa == "hunt":
+                self.estado["noCentro"] = False
         now = time.monotonic()
         for key in ("selvagens", "spawns", "mobs", "slots"):
             items = msg.get(key)
@@ -216,6 +241,8 @@ class HuntManager:
         k = ev.get("k")
         if k == "hunt":
             # Única confirmação que reinicia a duração/sessão (spec).
+            self.estado["noCentro"] = False
+            self.campo_map = "hunt"
             self.session = HuntSession(slug=ev.get("slug"), nome=ev.get("nome"))
             self._wild_hp.clear()
             self.live_slots.clear()
@@ -295,8 +322,12 @@ class HuntManager:
         elif k == "outlandTier":
             log.info("[%s] Outland trocado: %s", self.account_name, ev.get("nome"))
         elif k == "centro":
-            log.info("[%s] centro.ir confirmado (motivo=%s)", self.account_name,
-                     ev.get("motivo"))
+            self.estado["noCentro"] = True
+            self.campo_map = "centro"
+            self.live_slots.clear()
+            motivo = ev.get("motivo")
+            self._push_live_event("center", name=self.account_name, reason=motivo, manual=(motivo is None))
+            log.info("[%s] centro.ir confirmado (motivo=%s)", self.account_name, motivo)
 
     def _on_wild_death(self, ev: dict) -> None:
         if self.session is None:

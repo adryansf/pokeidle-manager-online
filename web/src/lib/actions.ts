@@ -34,8 +34,13 @@ export interface PokemonSheet {
   potencia: number;
   stats: Record<string, number>;
   ivs: Record<string, number>;
+  refino?: Record<string, number>;
   tmAoe: boolean;
   trainerLevel: number;
+  tipoDoDia?: string | null;
+  escudo?: boolean;
+  ballId?: number | null;
+  comPocao?: boolean;
 }
 
 export interface PauseResult {
@@ -109,6 +114,10 @@ export interface AccountLive {
   nick: string;
   state: string;
   paused: boolean;
+  farmPaused?: boolean;
+  farmPausePending?: boolean;
+  location?: import("./types").AccountLocation | null;
+  escapeRopes?: number;
   lastReason?: string;
   combatLockMs: number;
   hunt: {
@@ -180,6 +189,7 @@ export type AutomationPatch = Partial<{
   autoBestHunt: boolean;
   autoBestHuntRegion: string;
   gameAutoPotion: boolean;
+  autoVoltarHunt: boolean;
   hpLimiarPct: number;
   pvpAuto: boolean;
 }>;
@@ -195,14 +205,15 @@ export const actions = {
   cancelHuntQueue: (accId: string) => call<{ ok: boolean }>("DELETE", `/api/accounts/${numId(accId)}/hunt/queue`),
   pause: (accId: string, paused?: boolean) =>
     call<PauseResult>("POST", `/api/accounts/${numId(accId)}/pause`, paused === undefined ? {} : { paused }),
-  farmPause: (accId: string, paused?: boolean) =>
-    call<{ ok: boolean; farmPaused: boolean; sentCenter?: boolean; queued?: boolean; resumeSlug?: string | null }>(
+  farmPause: (accId: string, paused?: boolean, force?: "rope" | "forfeit") =>
+    call<{ ok: boolean; farmPaused: boolean; sentCenter?: boolean; queued?: boolean; inCenter?: boolean; method?: string; resumeSlug?: string | null }>(
       "POST",
       `/api/accounts/${numId(accId)}/farm-pause`,
-      paused === undefined ? {} : { paused },
+      force ? { paused: true, force } : paused === undefined ? {} : { paused },
     ),
   live: (accId: string) => call<AccountLive>("GET", `/api/accounts/${numId(accId)}/live`),
-  goCenter: (accId: string) => call<{ ok: boolean }>("POST", `/api/accounts/${numId(accId)}/center`),
+  goCenter: (accId: string, force?: "rope" | "forfeit") =>
+    call<{ ok: boolean; method?: string }>("POST", `/api/accounts/${numId(accId)}/center`, force ? { force } : {}),
   setAutomation: (accId: string, patch: AutomationPatch) =>
     call<{ ok: boolean; automation: import("./types").AccountAutomation }>("POST", `/api/accounts/${numId(accId)}/automation`, patch),
   captures: (opts?: { account?: string; onlyCaught?: boolean; onlyShiny?: boolean; limit?: number }) => {

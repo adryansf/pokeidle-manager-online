@@ -57,9 +57,19 @@ export interface AccountAutomation {
   autoBestHunt?: boolean;
   autoBestHuntRegion?: string;
   gameAutoPotion: boolean;
+  autoVoltarHunt?: boolean;
   hpLimiar?: number | null;
   hpLimiarPct?: number | null;
   pvpAuto: boolean;
+}
+
+export interface AccountLocation {
+  kind: "center" | "hunt" | "house" | "boss" | "mythic" | "safari" | "idle" | string;
+  label: string;
+  detail?: string | null;
+  slug?: string | null;
+  inCenter: boolean;
+  inHunt: boolean;
 }
 
 export interface InventoryItem {
@@ -111,6 +121,8 @@ export interface AccountSnapshot {
   paused?: boolean;
   farmPaused?: boolean;
   farmPausePending?: boolean;
+  location?: AccountLocation | null;
+  escapeRopes?: number;
   proxy?: ProxyBadgeInfo | null;
   blocked?: { kind: string; detail: string } | null;
   lastReason?: string;

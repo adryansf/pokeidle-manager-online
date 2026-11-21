@@ -54,6 +54,10 @@ const sameAccount = (a: AccountSnapshot, b: AccountSnapshot) =>
   a.paused === b.paused &&
   a.farmPaused === b.farmPaused &&
   a.farmPausePending === b.farmPausePending &&
+  a.location?.kind === b.location?.kind &&
+  a.location?.label === b.location?.label &&
+  a.location?.inCenter === b.location?.inCenter &&
+  a.escapeRopes === b.escapeRopes &&
   a.proxy?.name === b.proxy?.name &&
   a.proxy?.host === b.proxy?.host &&
   a.proxy?.port === b.proxy?.port &&

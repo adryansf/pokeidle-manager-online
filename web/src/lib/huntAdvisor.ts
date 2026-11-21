@@ -2,11 +2,32 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { actions, type PokemonSheet } from "./actions";
 
 /**
- * "Melhor hunt" para o Pokémon equipado. O cálculo é o motor da calculadora de hunt do PokéIdle Hub
- * (https://pokeidle-gg.pages.dev), que roda num worker (public/hunt-worker.js) carregando o código do site deles.
+ * "Melhor hunt" para o Pokémon equipado. O cálculo é o motor da calculadora de hunt do PokéIdle Guide
+ * (https://pokeidleguide.io), que roda num worker (public/hunt-worker.js) carregando o código do site deles.
  * O Pokémon vem direto do estado do jogo (sem colar ficha) e nada dele sai do navegador.
  */
-export type HuntOrder = "xp" | "ouro";
+export type HuntOrder = "xp" | "xpTreinador" | "ouro" | "shiny" | "fragmento";
+export type HuntSafety = "all" | "no_death" | "safe50";
+
+export interface HuntSimOptions {
+  comPocao?: boolean;
+  aoe?: boolean;
+  tipoDoDia?: string;
+  escudo?: boolean;
+  bola?: number | null;
+}
+
+export interface HuntBallInfo {
+  id: number;
+  nome: string;
+  catchRate: number;
+}
+
+export interface HuntFragmentInfo {
+  nivelMin: number;
+  porOvo: number;
+  horasChoca: number;
+}
 
 export interface HuntLine {
   slug: string;
@@ -15,30 +36,92 @@ export interface HuntLine {
   nivel: number;
   liberada: boolean;
   inviavel: boolean;
+  motivo?: string | null;
   xpPokemonH: number;
+  xpTreinadorH: number;
   ouroH: number;
   kph: number;
+  kphFaixa?: [number, number] | null;
+  ttk?: number | null;
   mortesH: number;
   umHit: boolean;
   hitPct: number;
+  ritmo?: string | null;
+  mapa?: string | null;
+  aoe?: { porGolpe?: number; estimado?: boolean } | null;
   melhorGolpe: { nome: string; tipo: string } | null;
+  efetividade?: number;
+  capturaChance?: number | null;
+  capturasH?: number;
+  shinyChance?: number | null;
+  shinyH?: number;
+  fragmentoChance?: number;
+  fragmentoH?: number;
 }
+
 interface Result {
   versao: string | null;
   total: number;
   linhas: HuntLine[];
+  bolas?: HuntBallInfo[];
+  fragmento?: HuntFragmentInfo | null;
+  captura?: { bola?: HuntBallInfo | null; chanceShiny?: number } | null;
 }
+
 export interface BestHunts {
   sheet: PokemonSheet;
   lines: HuntLine[];
   versao: string | null;
+  bolas: HuntBallInfo[];
+  fragmento: HuntFragmentInfo;
+  captura: { bola?: HuntBallInfo | null; chanceShiny?: number } | null;
 }
 
-const metric = (l: HuntLine, o: HuntOrder) => (o === "ouro" ? l.ouroH : l.xpPokemonH);
-/** As hunts que a conta já pode fazer e que o motor acha viáveis, da que mais rende para a que menos rende. */
-export const rankLines = (lines: HuntLine[] | undefined, order: HuntOrder) =>
-  (lines ?? []).filter((l) => l.liberada && !l.inviavel && metric(l, order) > 0).sort((a, b) => metric(b, order) - metric(a, order) || a.nivel - b.nivel);
-export const lineMetric = metric;
+export const lineMetric = (l: HuntLine, o: HuntOrder): number => {
+  switch (o) {
+    case "ouro":
+      return l.ouroH;
+    case "xpTreinador":
+      return l.xpTreinadorH;
+    case "shiny":
+      return l.shinyH ?? 0;
+    case "fragmento":
+      return l.fragmentoH ?? 0;
+    default:
+      return l.xpPokemonH;
+  }
+};
+
+export function fmtTimeUntil(perHour: number): string {
+  if (!(perHour > 0)) return "—";
+  const h = 1 / perHour;
+  if (h < 1) return `${Math.max(1, Math.round(h * 60))} min`;
+  if (h < 100) return `${Math.round(h)} h`;
+  return `${Math.round(h / 24)} d`;
+}
+
+export interface RankFilter {
+  region?: string;
+  safety?: HuntSafety;
+  onlyOpen?: boolean;
+}
+
+/** As hunts viáveis filtradas por região/segurança/liberação, ordenadas pela métrica escolhida. */
+export const rankLines = (lines: HuntLine[] | undefined, order: HuntOrder, filter?: RankFilter) => {
+  const onlyOpen = filter?.onlyOpen ?? true;
+  const safety = filter?.safety ?? "all";
+  const region = filter?.region || "";
+  return (lines ?? [])
+    .filter((l) => {
+      if (l.inviavel) return false;
+      if (onlyOpen && !l.liberada) return false;
+      if (region && l.regiao !== region) return false;
+      if (safety === "no_death" && (l.umHit || l.mortesH >= 0.5)) return false;
+      if (safety === "safe50" && (l.umHit || l.mortesH >= 0.5 || l.hitPct >= 0.5)) return false;
+      return lineMetric(l, order) > 0;
+    })
+    .sort((a, b) => lineMetric(b, order) - lineMetric(a, order) || b.xpPokemonH - a.xpPokemonH || a.nivel - b.nivel);
+};
 
 // ----------------------------------------------------------------- worker
 let worker: Worker | null = null;
@@ -51,7 +134,8 @@ function failAll(msg: string) {
   worker?.terminate();
   worker = null;
 }
-function run(entrada: { sheet: PokemonSheet; nivelTreinador: number }): Promise<Result> {
+
+function run(entrada: { sheet: PokemonSheet; nivelTreinador: number; opcoes?: HuntSimOptions }): Promise<Result> {
   if (!worker) {
     worker = new Worker(`${import.meta.env.BASE_URL}hunt-worker.js`, { type: "module" });
     worker.onmessage = (e: MessageEvent<{ id: number; ok: boolean; dados?: Result; erro?: string }>) => {
@@ -72,39 +156,69 @@ function run(entrada: { sheet: PokemonSheet; nivelTreinador: number }): Promise<
 
 // ----------------------------------------------------------------- hook
 const cache = new Map<string, BestHunts>();
-const keyOf = (s: PokemonSheet) => [s.speciesId, s.level, s.potencia, s.quality, s.shiny, s.trainerLevel, Object.values(s.stats).join("-")].join("|");
+const keyOf = (s: PokemonSheet, op?: HuntSimOptions) =>
+  [
+    s.speciesId,
+    s.level,
+    s.potencia,
+    s.quality,
+    s.shiny,
+    s.trainerLevel,
+    Object.values(s.stats).join("-"),
+    Object.values(s.refino ?? {}).join("-"),
+    op?.comPocao ?? s.comPocao ?? true,
+    op?.aoe ?? s.tmAoe,
+    op?.tipoDoDia !== undefined ? op.tipoDoDia : (s.tipoDoDia ?? ""),
+    op?.escudo ?? s.escudo ?? false,
+    op?.bola ?? s.ballId ?? "",
+  ].join("|");
+
 const RECALC_MS = 45_000; // subir de nível muda os stats: recalcula, mas sem exagero
 
 /** `trigger` muda quando o Pokémon equipado ou o nível da conta muda; `enabled` só com a conta online. */
-export function useBestHunts(accId: string | null, trigger: string, enabled: boolean) {
+export function useBestHunts(
+  accId: string | null,
+  trigger: string,
+  enabled: boolean,
+  opcoes?: HuntSimOptions,
+) {
   const [data, setData] = useState<BestHunts | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const last = useRef({ acc: "", at: 0 });
+  const last = useRef({ acc: "", optKey: "", at: 0 });
   const [nonce, setNonce] = useState(0);
   const reload = useCallback(() => setNonce((n) => n + 1), []);
+  const optKey = JSON.stringify(opcoes ?? {});
 
   useEffect(() => {
     if (!accId || !enabled) return;
     let alive = true;
     const switched = last.current.acc !== accId;
+    const optChanged = last.current.optKey !== optKey;
     if (switched) setData(null);
-    const wait = switched || !last.current.at ? 300 : Math.max(300, last.current.at + RECALC_MS - Date.now());
+    const wait = switched || optChanged || !last.current.at ? 250 : Math.max(250, last.current.at + RECALC_MS - Date.now());
     const t = setTimeout(async () => {
       try {
         const sheet = await actions.sheet(accId);
-        const key = keyOf(sheet);
+        const key = keyOf(sheet, opcoes);
         const hit = cache.get(key);
         if (hit) {
           if (alive) (setData(hit), setError(null));
           return;
         }
         if (alive) setLoading(true);
-        const r = await run({ sheet, nivelTreinador: sheet.trainerLevel });
-        const out: BestHunts = { sheet, lines: r.linhas, versao: r.versao };
+        const r = await run({ sheet, nivelTreinador: sheet.trainerLevel, opcoes });
+        const out: BestHunts = {
+          sheet,
+          lines: r.linhas,
+          versao: r.versao,
+          bolas: r.bolas ?? [],
+          fragmento: r.fragmento ?? { nivelMin: 5000, porOvo: 10, horasChoca: 48 },
+          captura: r.captura ?? null,
+        };
         cache.set(key, out);
-        if (cache.size > 12) cache.delete(cache.keys().next().value as string);
-        last.current = { acc: accId, at: Date.now() };
+        if (cache.size > 20) cache.delete(cache.keys().next().value as string);
+        last.current = { acc: accId, optKey, at: Date.now() };
         if (alive) (setData(out), setError(null));
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : "Erro inesperado");
@@ -113,11 +227,13 @@ export function useBestHunts(accId: string | null, trigger: string, enabled: boo
       }
     }, wait);
     last.current.acc = accId;
+    last.current.optKey = optKey;
     return () => {
       alive = false;
       clearTimeout(t);
     };
-  }, [accId, trigger, enabled, nonce]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accId, trigger, enabled, nonce, optKey]);
 
   return { data, error, loading, reload };
 }

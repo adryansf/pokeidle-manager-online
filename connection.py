@@ -243,6 +243,8 @@ class AccountConnection:
         self.farm_paused: bool = False            # conta online, mas parada no Centro Pokémon sem farmar
         self._farm_pause_pending_center: bool = False
         self._farm_resume_slug: str | None = None
+        self._saved_auto_voltar_hunt: bool | None = None
+        self._last_center_try_at: float = 0.0
         self._last_potion_fallback_at: float = 0.0
         self._last_auto_center_at: float = 0.0
         self._last_auto_hunt_at: float = 0.0
@@ -517,8 +519,8 @@ class AccountConnection:
         todo; passando FRAME_SILENCE_S sem nenhum, fecha o socket e o supervisor reconecta (novo welcome)."""
         while True:
             await asyncio.sleep(config.FRAME_CHECK_S)
-            if not self.estado.get("huntSlug"):
-                self._last_frame = time.monotonic()      # sem hunt não há o que esperar
+            if self.is_in_center() or not self.estado.get("huntSlug"):
+                self._last_frame = time.monotonic()      # no Centro ou sem hunt não há frames contínuos de combate
                 continue
             quiet = time.monotonic() - self._last_frame
             if quiet >= config.FRAME_SILENCE_S:
@@ -728,26 +730,100 @@ class AccountConnection:
             except Exception as e:  # noqa: BLE001
                 log.debug("[%s] safety_loop erro ignorado: %r", self.acc.name, e)
 
-    async def set_farm_pause(self, paused: bool) -> dict:
-        """Pausa o farm mantendo a conta ONLINE: envia ao Centro Pokémon e não entra em nenhuma hunt até retomar."""
+    def is_in_center(self) -> bool:
+        """True quando o servidor confirma que a conta está no Centro Pokémon (`estado.noCentro` ou `campo.init`)."""
+        return bool(self.estado.get("noCentro")) or self.hunt.campo_map == "centro"
+
+    def current_location(self) -> dict:
+        """Local atual exato da conta (mesma lógica do cliente oficial `app.js`)."""
+        est = self.estado
+        if est.get("noCentro") or self.hunt.campo_map == "centro":
+            return {"kind": "center", "label": "Centro Pokémon", "detail": None, "inCenter": True, "inHunt": False}
+        if isinstance(est.get("casa"), dict) and est["casa"].get("dentro"):
+            return {"kind": "house", "label": "Casa", "detail": None, "inCenter": False, "inHunt": False}
+        boss = est.get("boss") if isinstance(est.get("boss"), dict) else None
+        arena = boss.get("arena") if isinstance(boss, dict) else None
+        if isinstance(arena, dict) and arena:
+            detail = arena.get("nome") or arena.get("key")
+            return {"kind": "boss", "label": "Arena de Boss", "detail": detail, "inCenter": False, "inHunt": False}
+        if est.get("mistico"):
+            return {"kind": "mythic", "label": "Encontro Místico", "detail": None, "inCenter": False, "inHunt": False}
+        if isinstance(est.get("safari"), dict) and est["safari"].get("dentro"):
+            return {"kind": "safari", "label": "Zona Safari", "detail": None, "inCenter": False, "inHunt": True}
+        slug = est.get("huntSlug") or (self.hunt.session.slug if self.hunt.session else None)
+        if slug:
+            h = next((x for x in self.hunts if isinstance(x, dict) and x.get("slug") == slug), None)
+            hname = (h.get("nome") if h else None) or (self.hunt.session.nome if self.hunt.session else None) or slug
+            return {"kind": "hunt", "label": f"Hunt: {hname}", "detail": hname, "slug": slug, "inCenter": False, "inHunt": True}
+        return {"kind": "idle", "label": "Fora de hunt", "detail": None, "inCenter": False, "inHunt": False}
+
+    async def _disable_server_auto_return_hunt(self) -> None:
+        """Desliga `autoVoltarHunt` no servidor enquanto o farm estiver pausado — evita o jogo devolver
+        a conta para a hunt sozinho após morrer ou curar no Centro Pokémon."""
+        auto = self.estado.get("automation")
+        if not isinstance(auto, dict):
+            return
+        if auto.get("autoVoltarHunt"):
+            if self._saved_auto_voltar_hunt is None:
+                self._saved_auto_voltar_hunt = True
+            if self.can_send:
+                await self.set_automation({"autoVoltarHunt": False})
+                auto["autoVoltarHunt"] = False
+                log.info("[%s] autoVoltarHunt desativado no servidor durante pausa do farm", self.acc.name)
+
+    async def set_farm_pause(self, paused: bool, *, force: str | None = None) -> dict:
+        """Pausa o farm mantendo a conta ONLINE: desliga `autoVoltarHunt`, envia ao Centro Pokémon e
+        mantém a conta lá até retomar. `force='rope'` usa Escape Rope; `force='forfeit'` usa `centro.desistir`."""
         self.farm_paused = bool(paused)
         if self.farm_paused:
-            cur_slug = (self.hunt.session.slug if self.hunt.session else None) or self.estado.get("huntSlug")
+            cur_slug = self.estado.get("huntSlug") or (self.hunt.session.slug if self.hunt.session else None)
             if cur_slug:
                 self._farm_resume_slug = cur_slug
             self.pending_hunt = None
             self._center_return_slug = None
+            await self._disable_server_auto_return_hunt()
+
+            if self.is_in_center():
+                self._farm_pause_pending_center = False
+                log.info("[%s] farm pausado: conta já está no Centro Pokémon", self.acc.name)
+                return {"ok": True, "farmPaused": True, "sentCenter": True, "queued": False, "inCenter": True}
+
+            if self.can_send and force == "rope":
+                ropes = int((self.estado.get("items") or {}).get("70010", 0) or 0)
+                if ropes <= 0:
+                    raise RuntimeError("A conta não tem Escape Rope na mochila.")
+                await self.hunt.use_escape_rope()
+                self._last_center_try_at = time.monotonic()
+                self._farm_pause_pending_center = True
+                self.hunt._push_live_event("center", name=self.acc.nick, manual=True, method="rope")
+                return {"ok": True, "farmPaused": True, "sentCenter": True, "queued": False, "method": "rope"}
+
+            if self.can_send and force == "forfeit":
+                await self.hunt.forfeit_combat()
+                self._last_center_try_at = time.monotonic()
+                self._farm_pause_pending_center = True
+                self.hunt._push_live_event("center", name=self.acc.nick, manual=True, method="forfeit")
+                return {"ok": True, "farmPaused": True, "sentCenter": True, "queued": False, "method": "forfeit"}
+
+            # Sempre mantém pendente até o servidor confirmar `noCentro == True` (evita perder se um hit chegar na hora).
+            self._farm_pause_pending_center = True
             if self.can_send and self.combat_lock_ms() == 0:
                 await self.hunt.go_to_center()
-                self._farm_pause_pending_center = False
+                self._last_center_try_at = time.monotonic()
                 self.hunt._push_live_event("center", name=self.acc.nick, manual=True)
-                log.info("[%s] farm pausado: enviado ao Centro Pokémon (retomará %s)", self.acc.name, self._farm_resume_slug)
+                log.info("[%s] farm pausado: centro.ir enviado (aguardando confirmação noCentro)", self.acc.name)
                 return {"ok": True, "farmPaused": True, "sentCenter": True, "queued": False}
-            self._farm_pause_pending_center = True
             log.info("[%s] farm pausado: aguardando fim do combate para ir ao Centro Pokémon", self.acc.name)
             return {"ok": True, "farmPaused": True, "sentCenter": False, "queued": True}
         else:
             self._farm_pause_pending_center = False
+            if self._saved_auto_voltar_hunt and self.can_send:
+                try:
+                    await self.set_automation({"autoVoltarHunt": True})
+                    self.estado.setdefault("automation", {})["autoVoltarHunt"] = True
+                except Exception:  # noqa: BLE001
+                    pass
+            self._saved_auto_voltar_hunt = None
             target = self._farm_resume_slug or self.acc.hunt_slug
             if target and self.can_send:
                 if self.combat_lock_ms() > 0:
@@ -758,14 +834,24 @@ class AccountConnection:
             return {"ok": True, "farmPaused": False, "resumeSlug": target}
 
     async def _check_farm_pause(self) -> None:
-        if not self.farm_paused or not self._farm_pause_pending_center:
+        if not self.farm_paused or not self.can_send:
             return
+        if self.is_in_center():
+            if self._farm_pause_pending_center:
+                self._farm_pause_pending_center = False
+                log.info("[%s] conta confirmada no Centro Pokémon (farm pausado)", self.acc.name)
+            return
+        # Conta não está no centro enquanto farm está pausado: garante autoVoltarHunt desligado e envia centro.ir.
+        self._farm_pause_pending_center = True
+        await self._disable_server_auto_return_hunt()
         if self.combat_lock_ms() > 0:
             return
+        now = time.monotonic()
+        if now - self._last_center_try_at < 1.5:
+            return
+        self._last_center_try_at = now
         await self.hunt.go_to_center()
-        self._farm_pause_pending_center = False
-        self.hunt._push_live_event("center", name=self.acc.nick, manual=True)
-        log.info("[%s] combate encerrado: conta enviada ao Centro Pokémon (farm pausado)", self.acc.name)
+        log.info("[%s] combate livre: enviando centro.ir (farm pausado)", self.acc.name)
 
     def _pick_best_hunt_for_level(self) -> dict | None:
         """Escolhe a melhor hunt liberada pelo nível do treinador (respeitando filtro de região)."""
@@ -943,6 +1029,13 @@ class AccountConnection:
         attempts = 0
         while True:
             await asyncio.sleep(0.25)
+            if self.farm_paused:
+                try:
+                    await self._check_farm_pause()
+                except Exception as e:  # noqa: BLE001
+                    log.debug("[%s] check_farm_pause erro: %r", self.acc.name, e)
+                attempts = 0
+                continue
             slug = self.pending_hunt
             if not slug:
                 attempts = 0

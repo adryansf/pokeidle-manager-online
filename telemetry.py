@@ -264,6 +264,7 @@ def _automation_snapshot(c: "AccountConnection") -> dict:
         "autoBestHunt": bool(c.acc.auto_best_hunt),
         "autoBestHuntRegion": c.acc.auto_best_hunt_region or "all",
         "gameAutoPotion": bool(auto.get("autoPotion", True)),
+        "autoVoltarHunt": bool(auto.get("autoVoltarHunt", False)),
         "hpLimiar": raw_limiar,
         "hpLimiarPct": hp_limiar_pct,
         "pvpAuto": bool(c.pvp.auto),
@@ -289,6 +290,8 @@ def account_snapshot(c: "AccountConnection", proxy_names: dict[tuple, str] | Non
         "paused": bool(getattr(c, "manual_paused", False) or c.state == State.PAUSED_MANUAL),
         "farmPaused": bool(getattr(c, "farm_paused", False)),
         "farmPausePending": bool(getattr(c, "_farm_pause_pending_center", False)),
+        "location": c.current_location(),
+        "escapeRopes": int((est.get("items") or {}).get("70010", 0) or 0),
         "proxy": _proxy_snapshot(c, proxy_names),
         "blocked": c.block,      # {kind, detail} quando o jogo recusou a conta
         "lastReason": c.last_reason,
@@ -375,8 +378,9 @@ _SECURITY_HEADERS = {
 
 # O worker da "Melhor hunt" roda o motor de um site de terceiros (PokéIdle Hub). Esta CSP, entregue com o próprio
 # arquivo do worker, só deixa esse código falar com o Hub e o isola em sandbox: ele não alcança a nossa API.
-HUNT_HUB = "https://pokeidle-gg.pages.dev"
-_WORKER_CSP = f"default-src 'none'; script-src {HUNT_HUB}; connect-src {HUNT_HUB}; sandbox allow-scripts"
+HUNT_HUB = "https://pokeidleguide.io"
+_HUNT_HUBS = "https://pokeidleguide.io https://pokeidle-gg.pages.dev"
+_WORKER_CSP = f"default-src 'none'; script-src {_HUNT_HUBS}; connect-src {_HUNT_HUBS}; sandbox allow-scripts"
 _WORKER_PATH = "/hunt-worker.js"
 
 
