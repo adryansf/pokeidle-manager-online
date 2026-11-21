@@ -210,6 +210,7 @@ export interface PokemonSheetPayload extends SpeciesPayload {
     refino?: Record<string, number>;
     refinoTotal?: number;
     tmElemental: string | null;
+    tmAoe?: boolean;
     caughtAt: number;
     caughtBy?: boolean | string;
     apelido?: string | null;

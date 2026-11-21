@@ -171,10 +171,11 @@ class AutoRestock:
     ABAIXO de `threshold`, comprando sempre `qty` unidades.
 
     Quais IDs repor ("equipados"), em ordem de prioridade:
-      Potion: 1) `ACCn_POTION_ID`; 2) `heldItemId` do Pokémon ativo (se for uma
-              Potion conhecida; confirmado pela usuária); 3) `estado.automation.potionIds`.
-      Ball:   1) `ACCn_BALL_ID`; 2) `estado.automation.ballIds` (Balls compráveis);
-              3) primeira da prioridade de captura configurada.
+      Potion: 1) `ACCn_POTION_ID` (escolha salva); 2) 1ª poção de `estado.automation.potionIds`;
+              3) `heldItemId` do Pokémon ativo (se for uma Potion conhecida).
+      Ball:   1) `ACCn_BALL_ID` (escolha salva, se comprável); 2) 1ª bola de
+              `estado.automation.ballIds` (se comprável); 3) 1ª comprável da
+              prioridade de captura configurada.
     """
 
     RETRY_S = 30  # não repete a compra do mesmo ID antes disso (ex.: gold insuficiente)
@@ -254,10 +255,10 @@ def ball_ids_resolver(estado: dict, ball_priority, ball_id):
     def resolve() -> list[int]:
         bid = _live(ball_id)
         if bid is not None:
-            return [bid]
-        ids = [i for i in (estado.get("automation") or {}).get("ballIds", []) if i in BUYABLE_BALL_IDS]
-        if ids:
-            # Só a 1ª bola equipada na fila da automação.
-            return ids[:1]
+            return [bid] if bid in BUYABLE_BALL_IDS else []
+        raw_ids = [i for i in (estado.get("automation") or {}).get("ballIds", []) if isinstance(i, int)]
+        if raw_ids:
+            # Só a 1ª bola equipada na fila da automação (se for comprável na loja NPC).
+            return [raw_ids[0]] if raw_ids[0] in BUYABLE_BALL_IDS else []
         return [i for i in ball_priority if i in BUYABLE_BALL_IDS][:1]
     return resolve

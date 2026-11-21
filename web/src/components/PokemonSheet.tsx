@@ -16,7 +16,7 @@ import {
   type SpeciesPayload,
 } from "@/lib/pvpTeam";
 import { effectiveness, TYPES } from "@/lib/typeChart";
-import { ivStatColor } from "@/lib/selos";
+import { ivStatColor, percentilQualidade } from "@/lib/selos";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 const VIOLET = "#b66bff";
@@ -524,12 +524,18 @@ const loadSheet = (s: SheetSource) =>
   : teamApi.listing(s.id);
 
 const POTENCY_BONUS: Record<number, string> = {
-  1: "×1 (sem bônus)",
+  1: "sem bônus",
   2: "+5% em todos os stats",
   3: "+10% em todos os stats",
   4: "+25% em todos os stats",
   5: "+100% em todos os stats",
 };
+
+function bandLabel(faixa?: string, nota?: number | null): string {
+  if (faixa) return GRADE_BANDS[faixaIdx(faixa)];
+  if (nota != null) return GRADE_BANDS[Math.min(9, Math.max(0, Math.ceil(nota) - 1))];
+  return "";
+}
 
 function formatForChatGpt(d: PokemonSheetPayload): string {
   const pk = d.pokemon;
@@ -546,19 +552,22 @@ function formatForChatGpt(d: PokemonSheetPayload): string {
     const ivTotal = d.calc?.ivTotal ?? (pk.ivs ? Object.values(pk.ivs).reduce((a, b) => a + (Number(b) || 0), 0) : null);
     const pot = pk.potencia ?? 1;
     const potDesc = POTENCY_BONUS[pot] ? ` (${POTENCY_BONUS[pot]})` : "";
-    const faixaLabel = d.calc?.faixa ? d.calc.faixa.charAt(0).toUpperCase() + d.calc.faixa.slice(1) : "";
+    const notaVal = d.calc?.nota ?? pk.nota;
+    const faixaLabel = bandLabel(d.calc?.faixa, notaVal);
 
     lines.push("", "## O pokemon", "");
     lines.push(`- Espécie: ${sp?.name || pk.nome} (#${pk.speciesId})${types ? ` — ${types}` : ""}`);
     lines.push(`- Shiny: ${pk.shiny ? "sim" : "não"}`);
     lines.push(`- Nível: ${pk.level}`);
     lines.push(`- Potência: P${pot}${potDesc}`);
-    if (pk.quality != null) lines.push(`- Qualidade: ${pk.quality}`);
+    if (pk.quality != null) {
+      const qPct = Math.round(percentilQualidade(pk.quality) * 100);
+      lines.push(`- Qualidade: ${pk.quality} (melhor que ${qPct}% dos nascimentos)`);
+    }
     if (ivTotal != null) lines.push(`- IV somado: ${ivTotal} de 192`);
     if (d.calc?.lendario) {
       lines.push(`- Nota da Calculadora: Lendário/Mítico (sem nota)`);
-    } else if (d.calc?.nota != null || pk.nota != null) {
-      const notaVal = d.calc?.nota ?? pk.nota;
+    } else if (notaVal != null) {
       lines.push(`- Nota da Calculadora: ${notaVal} de 10${faixaLabel ? ` (${faixaLabel})` : ""}`);
     }
     if (pk.poder != null) lines.push(`- Poder (⚔): ${nf.format(pk.poder)}`);
@@ -581,8 +590,9 @@ function formatForChatGpt(d: PokemonSheetPayload): string {
     let sumStat = 0;
     let hasBase = false;
     for (const [key, label, ivKey] of STAT_LABEL) {
-      const baseVal = d.bases?.[key] ?? (sp ? (sp[BASE_KEY[key]] as number | undefined) : undefined);
       const refVal = pk.refino?.[key] ?? 0;
+      const spBase = sp ? (sp[BASE_KEY[key]] as number | undefined) : undefined;
+      const baseVal = typeof spBase === "number" ? spBase : typeof d.bases?.[key] === "number" ? d.bases[key] - refVal : undefined;
       const ivVal = pk.ivs?.[ivKey];
       const stVal = pk.stats?.[key];
       if (typeof baseVal === "number") {
@@ -606,11 +616,12 @@ function formatForChatGpt(d: PokemonSheetPayload): string {
 
     lines.push("", "## TMs e Z-Move", "");
     lines.push(`- Z-Move: ${pk.tmElemental ? pk.tmElemental : "nenhum (sem TM elemental)"}`);
+    lines.push(`- TM AoE: ${pk.tmAoe ? "sim" : "não"}`);
 
     if (d.calc?.finais?.length) {
       lines.push("", "## Evoluções finais", "");
       for (const f of d.calc.finais) {
-        const fx = f.faixa ? f.faixa.charAt(0).toUpperCase() + f.faixa.slice(1) : "";
+        const fx = bandLabel(f.faixa, f.nota);
         lines.push(`- ${f.name}: nota ${f.nota} (${fx})${f.mercado ? " · aceito no mercado" : ""}`);
       }
     }
