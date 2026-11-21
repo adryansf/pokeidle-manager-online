@@ -794,43 +794,11 @@ export function AccountDetailModal({
                         />
                       </div>
 
-                      {/* Controle de Hunt Específica & Pausar Farm no Pokécentro */}
+                      {/* Controle de Hunt Específica & Auto-Hunt */}
                       <div className="space-y-3 rounded-xl border border-edge/60 bg-void/50 p-3.5">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <h3 className="text-xs font-bold uppercase tracking-wide text-poke-gold">
-                            Hunt Específica & Pausar Farm (Pokécentro)
-                          </h3>
-                          <button
-                            type="button"
-                            disabled={busyKey === "farmPause" || acc.status !== "online"}
-                            onClick={async () => {
-                              setBusyKey("farmPause");
-                              setMsg(null);
-                              try {
-                                const r = await actions.farmPause(accId, !acc.farmPaused);
-                                setMsg({
-                                  tone: "ok",
-                                  text: r.farmPaused
-                                    ? r.queued
-                                      ? "Farm pausado: assim que sair do combate a conta irá ao Pokécentro e ficará parada lá."
-                                      : "Farm pausado: conta enviada ao Pokécentro (continua online sem caçar)."
-                                    : "Farm retomado!",
-                                });
-                              } catch (e) {
-                                setMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao pausar farm" });
-                              } finally {
-                                setBusyKey(null);
-                              }
-                            }}
-                            className={`btn px-3 py-1.5 text-xs font-bold disabled:opacity-50 ${
-                              acc.farmPaused
-                                ? "border-[#2f6b3a] bg-[#16301c] text-poke-green"
-                                : "border-[#7a5a1c] bg-[#33260e] text-poke-gold"
-                            }`}
-                          >
-                            🏥 {acc.farmPaused ? "Retomar farm na hunt" : "Pausar farm (ir ao Pokécentro)"}
-                          </button>
-                        </div>
+                        <h3 className="text-xs font-bold uppercase tracking-wide text-poke-gold">
+                          Hunt Específica & Auto-Hunt
+                        </h3>
 
                         <div className="grid gap-2.5 sm:grid-cols-2">
                           <label className="block space-y-1">

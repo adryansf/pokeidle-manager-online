@@ -99,34 +99,6 @@ export function BulkActionsModal({ onClose }: { onClose: () => void }) {
             disabled={busy || onlineCount === 0}
             onClick={() =>
               void run(async () => {
-                const r = await actions.bulkFarmPause(true);
-                return { tone: "ok", text: `Farm pausado (Pokécentro) em ${r.count} conta(s) — continuam online.` };
-              })
-            }
-            className="btn border-[#7a5a1c] bg-[#33260e]/80 text-poke-gold"
-          >
-            <HeartPulse className="size-4 text-poke-gold" aria-hidden />
-            Pausar farm (Centro) em todas
-          </button>
-          <button
-            type="button"
-            disabled={busy || ids.length === 0}
-            onClick={() =>
-              void run(async () => {
-                const r = await actions.bulkFarmPause(false);
-                return { tone: "ok", text: `Farm retomado em ${r.count} conta(s).` };
-              })
-            }
-            className="btn border-[#2f6b3a] bg-[#16301c]/80 text-poke-green"
-          >
-            <Play className="size-4" aria-hidden />
-            Retomar farm em todas
-          </button>
-          <button
-            type="button"
-            disabled={busy || onlineCount === 0}
-            onClick={() =>
-              void run(async () => {
                 const r = await actions.bulkCenter();
                 if (r.sent.length === 0) {
                   return { tone: "warn", text: "Nenhuma conta pôde ir ao Centro agora (em combate ou offline)." };

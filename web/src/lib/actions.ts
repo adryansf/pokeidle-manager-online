@@ -217,8 +217,12 @@ export const actions = {
   sheet: (accId: string) => call<PokemonSheet>("GET", `/api/accounts/${numId(accId)}/sheet`),
   resetSession: () => call<{ ok: boolean; reset: string[] }>("POST", "/api/session/reset"),
   cancelHuntQueue: (accId: string) => call<{ ok: boolean }>("DELETE", `/api/accounts/${numId(accId)}/hunt/queue`),
-  pause: (accId: string, paused?: boolean) =>
-    call<PauseResult>("POST", `/api/accounts/${numId(accId)}/pause`, paused === undefined ? {} : { paused }),
+  pause: (accId: string, paused?: boolean, force?: "rope" | "forfeit") =>
+    call<PauseResult>(
+      "POST",
+      `/api/accounts/${numId(accId)}/pause`,
+      force ? { paused: true, force } : paused === undefined ? {} : { paused },
+    ),
   farmPause: (accId: string, paused?: boolean, force?: "rope" | "forfeit") =>
     call<{ ok: boolean; farmPaused: boolean; sentCenter?: boolean; queued?: boolean; inCenter?: boolean; method?: string; resumeSlug?: string | null }>(
       "POST",

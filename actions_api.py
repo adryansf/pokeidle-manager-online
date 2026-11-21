@@ -44,6 +44,7 @@ class EquipIn(BaseModel):
 
 class PauseIn(BaseModel):
     paused: bool | None = None
+    force: Literal["rope", "forfeit"] | None = None
 
 
 class FarmPauseIn(BaseModel):
@@ -423,7 +424,11 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
         if conn is None:
             return JSONResponse({"error": "conta não encontrada ou desligada"}, status_code=404)
         target = (not conn.manual_paused) if (body is None or body.paused is None) else bool(body.paused)
-        await conn.set_manual_pause(target)
+        force = body.force if body is not None else None
+        try:
+            await conn.set_manual_pause(target, force=force)
+        except RuntimeError as e:
+            return JSONResponse({"error": str(e)}, status_code=409)
         return {"ok": True, "paused": conn.manual_paused, "state": conn.state.value}
 
     @app.get("/api/accounts/{acc_id}/live")

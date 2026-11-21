@@ -192,6 +192,9 @@ class AccountConnection:
         self._down_reason = ""
         self.state = State.DISCONNECTED
         self.manual_paused = False        # pausa manual acionada pelo usuário no painel
+        self._pause_disconnect_when_center = False  # indo ao Pokécentro antes de desconectar na pausa manual
+        self._pause_center_sent_at = 0.0
+        self._pause_attempts = 0
         self._active_ws = None            # socket ativo para fechar imediatamente ao pausar
         self._wake_event: asyncio.Event | None = None
         self.block: dict | None = None    # {kind, detail} quando BLOCKED
@@ -439,6 +442,13 @@ class AccountConnection:
                 self.shop.bind(ws)
                 self.market.bind(ws)
                 self.pvp.bind(ws)
+                if self._saved_auto_voltar_hunt and not self.farm_paused and not self.manual_paused:
+                    try:
+                        await self.set_automation({"autoVoltarHunt": True})
+                        self.estado.setdefault("automation", {})["autoVoltarHunt"] = True
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._saved_auto_voltar_hunt = None
                 if self.farm_paused:
                     self._farm_pause_pending_center = True
                 elif self.acc.auto_best_hunt:
@@ -448,6 +458,8 @@ class AccountConnection:
                         self._last_auto_hunt_at = time.monotonic()
                 elif self.acc.hunt_slug and (self.is_in_center() or self.acc.hunt_slug != self.estado.get("huntSlug")):
                     await self.hunt.select_hunt(self.acc.hunt_slug)
+                elif self._farm_resume_slug and self.is_in_center():
+                    await self.hunt.select_hunt(self._farm_resume_slug)
                 if self.on_online:
                     try:
                         await self.on_online(self)
@@ -1138,6 +1150,13 @@ class AccountConnection:
         attempts = 0
         while True:
             await asyncio.sleep(0.25)
+            if self._pause_disconnect_when_center:
+                try:
+                    await self._check_manual_pause_center()
+                except Exception as e:  # noqa: BLE001
+                    log.debug("[%s] check_manual_pause_center erro: %r", self.acc.name, e)
+                attempts = 0
+                continue
             if self.farm_paused:
                 try:
                     await self._check_farm_pause()
@@ -1186,27 +1205,102 @@ class AccountConnection:
                 r._last_try.clear()
                 await r.check_and_restock()
 
-    async def set_manual_pause(self, paused: bool) -> None:
-        """Pausa ou retoma manualmente a conta mantendo o card visível no Dashboard."""
+    async def _finish_manual_pause_disconnect(self) -> None:
+        self._pause_disconnect_when_center = False
+        self._farm_pause_pending_center = False
+        self._pause_attempts = 0
+        self._cancel_down_timer()
+        self.last_reason = "Pausada no Pokécentro pelo painel (sem reconectar)."
+        ws = self._active_ws
+        if ws is not None:
+            try:
+                await ws.close(code=1000, reason="pausa manual")
+            except Exception:  # noqa: BLE001
+                pass
+        self._set(State.PAUSED_MANUAL, "pausa manual pelo painel", "")
+        if self._wake_event is not None:
+            self._wake_event.set()
+
+    async def _check_manual_pause_center(self) -> None:
+        """Aguarda a conta entrar no Pokécentro (sem spammar) e desconecta de vez em PAUSED_MANUAL."""
+        if not self._pause_disconnect_when_center:
+            return
+        if self.is_in_center() or not self.can_send:
+            log.info("[%s] pausa manual: no Pokécentro — desconectando sem reconectar", self.acc.name)
+            await self._finish_manual_pause_disconnect()
+            return
+        await self._disable_server_auto_return_hunt()
+        if self.combat_lock_ms() > 0:
+            return
+        now = time.monotonic()
+        if self._pause_attempts >= 3 and (now - self._pause_center_sent_at) >= 2.5:
+            log.info("[%s] pausa manual: encerrando conexão após %d tentativas de centro.ir", self.acc.name, self._pause_attempts)
+            await self._finish_manual_pause_disconnect()
+            return
+        if self._pause_attempts == 0 or (now - self._pause_center_sent_at) >= 2.5:
+            self._pause_attempts += 1
+            self._pause_center_sent_at = now
+            await self.hunt.go_to_center()
+            log.info("[%s] pausa manual: centro.ir enviado (%d/3)", self.acc.name, self._pause_attempts)
+
+    async def set_manual_pause(self, paused: bool, *, force: str | None = None) -> None:
+        """Pausa (vai ao Pokécentro e desconecta sem tentar reconectar) ou retoma a conta."""
         self.manual_paused = bool(paused)
         if self.manual_paused:
-            self._cancel_down_timer()
-            self.last_reason = "Pausada manualmente pelo painel."
-            ws = self._active_ws
-            if ws is not None:
-                try:
-                    await ws.close(code=1000, reason="pausa manual")
-                except Exception:  # noqa: BLE001
-                    pass
-            self._set(State.PAUSED_MANUAL, "pausa manual pelo painel", "")
-            if self._wake_event is not None:
-                self._wake_event.set()
+            self.farm_paused = False
+            self.pending_hunt = None
+            self._center_return_slug = None
+            if self.can_send and not self.is_in_center():
+                cur_slug = self.estado.get("huntSlug") or (self.hunt.session.slug if self.hunt.session else None)
+                if cur_slug:
+                    self._farm_resume_slug = cur_slug
+                await self._disable_server_auto_return_hunt()
+                self._pause_disconnect_when_center = True
+                self._farm_pause_pending_center = True
+                self._pause_attempts = 0
+                self._pause_center_sent_at = 0.0
+                if force == "rope":
+                    ropes = int((self.estado.get("items") or {}).get("70010", 0) or 0)
+                    if ropes <= 0:
+                        raise RuntimeError("A conta não tem Escape Rope na mochila.")
+                    await self.hunt.use_escape_rope()
+                    self._pause_attempts = 1
+                    self._pause_center_sent_at = time.monotonic()
+                    self.hunt._push_live_event("center", name=self.acc.nick, manual=True, method="rope")
+                elif force == "forfeit":
+                    await self.hunt.forfeit_combat()
+                    self._pause_attempts = 1
+                    self._pause_center_sent_at = time.monotonic()
+                    self.hunt._push_live_event("center", name=self.acc.nick, manual=True, method="forfeit")
+                elif self.combat_lock_ms() == 0:
+                    await self.hunt.go_to_center()
+                    self._pause_attempts = 1
+                    self._pause_center_sent_at = time.monotonic()
+                    self.hunt._push_live_event("center", name=self.acc.nick, manual=True)
+                return
+            await self._finish_manual_pause_disconnect()
         else:
+            self._pause_disconnect_when_center = False
+            self._farm_pause_pending_center = False
+            self._pause_attempts = 0
+            self.farm_paused = False
+            self._last_auto_hunt_at = 0.0
             self.last_reason = ""
             if self.state == State.PAUSED_MANUAL:
                 self.state = State.DISCONNECTED
             if self._wake_event is not None:
                 self._wake_event.set()
+            # Se ainda estava conectado (usuário cancelou a pausa antes de chegar ao Pokécentro), retoma a hunt.
+            if self.can_send and self.is_in_center():
+                target = None
+                if self.acc.auto_best_hunt:
+                    best = self._pick_best_hunt_for_level()
+                    if best:
+                        target = best["slug"]
+                if not target:
+                    target = self.acc.hunt_slug or self._farm_resume_slug
+                if target:
+                    await self.hunt.select_hunt(target)
 
     async def _wait_wake(self, timeout: float | None = None) -> None:
         if self._wake_event is None:

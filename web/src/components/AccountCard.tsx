@@ -710,14 +710,24 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
               <button
                 type="button"
                 disabled={pauseBusy}
-                title={acc.paused ? "Retomar conta (voltar a conectar)" : "Pausar conta manualmente"}
+                title={acc.paused ? "Retomar conta (reconectar e voltar para a hunt)" : "Pausar conta: vai ao Pokécentro e desconecta sem tentar reconectar"}
                 aria-label={acc.paused ? `Retomar ${acc.nick}` : `Pausar ${acc.nick}`}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (justDragged() || pauseBusy) return;
                   setPauseBusy(true);
-                  void actions.pause(id, !acc.paused).finally(() => setPauseBusy(false));
+                  void (async () => {
+                    if (acc.paused && acc.automation?.autoBestHunt) {
+                      const prio = (acc.automation.autoBestHuntPriority || "xp") as HuntOrder;
+                      const reg = acc.automation.autoBestHuntRegion || "all";
+                      const sim = await computeBestHuntSlug(id, prio, reg).catch(() => null);
+                      if (sim?.slug && sim.slug !== acc.automation.autoBestHuntSlug) {
+                        await actions.setAutomation(id, { autoBestHuntSlug: sim.slug }).catch(() => {});
+                      }
+                    }
+                    await actions.pause(id, !acc.paused);
+                  })().finally(() => setPauseBusy(false));
                 }}
                 className={`inline-flex h-7 items-center gap-1 rounded-lg border px-2 text-[11px] font-bold transition-colors active:scale-95 disabled:opacity-50 ${
                   acc.paused
@@ -769,68 +779,42 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
       </header>
 
       {acc.paused && (
-        <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-[#7a5a1c] bg-[#33260e]/70 px-2.5 py-1.5 text-xs text-poke-gold">
-          <span className="truncate">Conta pausada manualmente — desconectada do jogo.</span>
-          <button
-            type="button"
-            disabled={pauseBusy}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (pauseBusy) return;
-              setPauseBusy(true);
-              void actions.pause(id, false).finally(() => setPauseBusy(false));
-            }}
-            className="shrink-0 rounded border border-[#2f6b3a] bg-[#16301c] px-2 py-0.5 text-[11px] font-bold text-poke-green hover:bg-[#1e4226] disabled:opacity-50"
-          >
-            Retomar
-          </button>
-        </div>
-      )}
-
-      {acc.farmPaused && !acc.paused && (
-        <div
-          className={`mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${
-            acc.location?.inCenter && !acc.farmPausePending
-              ? "border-[#2f6b3a] bg-[#16301c]/70 text-poke-green"
-              : "border-[#7a5a1c] bg-[#33260e]/70 text-poke-gold"
-          }`}
-        >
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#7a5a1c] bg-[#33260e]/70 px-2.5 py-1.5 text-xs text-poke-gold">
           <span className="min-w-0 flex-1 truncate">
-            {acc.location?.inCenter && !acc.farmPausePending
-              ? "🏥 No Centro Pokémon — farm pausado (conta online sem caçar)."
-              : "⏳ Aguardando fim do combate para ir ao Pokécentro (auto-voltar desligado)…"}
+            {acc.farmPausePending
+              ? "⏳ Aguardando fim do combate para ir ao Pokécentro e pausar (sem reconectar)…"
+              : "🏥 Conta pausada no Pokécentro — desconectada (não tenta reconectar)."}
           </span>
           <div className="flex shrink-0 flex-wrap items-center gap-1">
-            {acc.farmPausePending && !acc.location?.inCenter && (acc.escapeRopes ?? 0) > 0 && (
+            {acc.farmPausePending && (acc.escapeRopes ?? 0) > 0 && (
               <button
                 type="button"
-                disabled={autoBusy === "farmPause"}
-                title="Usa 1 Escape Rope para ir ao Centro Pokémon imediatamente sem perder XP"
+                disabled={pauseBusy}
+                title="Usa 1 Escape Rope para ir ao Centro Pokémon imediatamente sem perder XP e pausar"
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (autoBusy) return;
-                  setAutoBusy("farmPause");
-                  void actions.farmPause(id, true, "rope").finally(() => setAutoBusy(null));
+                  if (pauseBusy) return;
+                  setPauseBusy(true);
+                  void actions.pause(id, true, "rope").finally(() => setPauseBusy(false));
                 }}
                 className="rounded border border-edge bg-tile px-2 py-0.5 text-[11px] font-bold text-fg hover:border-poke-gold hover:text-poke-gold disabled:opacity-50"
               >
                 🪢 Rope (×{acc.escapeRopes})
               </button>
             )}
-            {acc.farmPausePending && !acc.location?.inCenter && (
+            {acc.farmPausePending && (
               <button
                 type="button"
-                disabled={autoBusy === "farmPause"}
-                title="Desistir do combate (centro.desistir): vai ao Pokécentro imediatamente (pode perder até 10% do XP do nível atual, ou 0% no Boost dos Atrasados)"
+                disabled={pauseBusy}
+                title="Desistir do combate (centro.desistir): vai ao Pokécentro imediatamente e pausa"
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (autoBusy) return;
-                  if (!window.confirm(`Desistir do combate em ${acc.nick} e ir ao Centro Pokémon imediatamente?\n\nAviso do jogo: desistir em combate pode custar até 10% do XP do nível atual (0% se estiver no Boost dos Atrasados).`)) return;
-                  setAutoBusy("farmPause");
-                  void actions.farmPause(id, true, "forfeit").finally(() => setAutoBusy(null));
+                  if (pauseBusy) return;
+                  if (!window.confirm(`Desistir do combate em ${acc.nick}, ir ao Centro Pokémon e pausar?\n\nAviso do jogo: desistir em combate pode custar até 10% do XP do nível atual (0% no Boost dos Atrasados).`)) return;
+                  setPauseBusy(true);
+                  void actions.pause(id, true, "forfeit").finally(() => setPauseBusy(false));
                 }}
                 className="rounded border border-[#7a2f27] bg-[#32140f] px-2 py-0.5 text-[11px] font-bold text-poke-red hover:bg-[#461c15] disabled:opacity-50"
               >
@@ -839,14 +823,14 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
             )}
             <button
               type="button"
-              disabled={autoBusy === "farmPause"}
+              disabled={pauseBusy}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                if (autoBusy) return;
-                setAutoBusy("farmPause");
+                if (pauseBusy) return;
+                setPauseBusy(true);
                 void (async () => {
-                  if (acc.automation?.autoBestHunt && acc.status === "online") {
+                  if (acc.automation?.autoBestHunt) {
                     const prio = (acc.automation.autoBestHuntPriority || "xp") as HuntOrder;
                     const reg = acc.automation.autoBestHuntRegion || "all";
                     const sim = await computeBestHuntSlug(id, prio, reg).catch(() => null);
@@ -854,12 +838,12 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
                       await actions.setAutomation(id, { autoBestHuntSlug: sim.slug }).catch(() => {});
                     }
                   }
-                  await actions.farmPause(id, false);
-                })().finally(() => setAutoBusy(null));
+                  await actions.pause(id, false);
+                })().finally(() => setPauseBusy(false));
               }}
-              className="rounded border border-[#2f6b3a] bg-[#16301c] px-2 py-0.5 text-[11px] font-bold text-poke-green hover:bg-[#1e4226] disabled:opacity-50"
+              className="shrink-0 rounded border border-[#2f6b3a] bg-[#16301c] px-2 py-0.5 text-[11px] font-bold text-poke-green hover:bg-[#1e4226] disabled:opacity-50"
             >
-              Retomar farm
+              {acc.farmPausePending ? "Cancelar" : "Retomar"}
             </button>
           </div>
         </div>
@@ -1008,27 +992,6 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
                 {label}
               </button>
             ))}
-            {acc.status === "online" && (
-              <button
-                type="button"
-                disabled={autoBusy === "farmPause"}
-                title={acc.farmPaused ? "Retomar o farm na hunt anterior" : "Pausar farm: vai ao Pokécentro e fica parado (conta continua online)"}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (justDragged() || autoBusy) return;
-                  setAutoBusy("farmPause");
-                  void actions.farmPause(id, !acc.farmPaused).finally(() => setAutoBusy(null));
-                }}
-                className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors active:scale-95 disabled:opacity-50 ${
-                  acc.farmPaused
-                    ? "border-[#7a5a1c] bg-[#33260e] text-poke-gold hover:bg-[#463413]"
-                    : "border-line bg-void/60 text-mute/80 hover:border-edge hover:text-poke-gold"
-                }`}
-              >
-                🏥 {acc.farmPaused ? "Retomar farm" : "Pausar farm"}
-              </button>
-            )}
           </div>
 
           {/* Linha 2: Auto-Comprar / Reposição na loja */}
