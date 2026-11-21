@@ -238,11 +238,15 @@ def potion_ids_resolver(estado: dict, get_active_pokemon, potion_id):
         pid = _live(potion_id)
         if pid is not None:
             return [pid]
+        auto_ids = [i for i in (estado.get("automation") or {}).get("potionIds", []) if i in KNOWN_POTION_IDS]
+        if auto_ids:
+            # Só a 1ª poção (a realmente equipada/exibida no card): o jogo manda a fila inteira [200,201,202,203,204].
+            return auto_ids[:1]
         pk = get_active_pokemon()
         held = pk.get("heldItemId") if pk else None
         if held in KNOWN_POTION_IDS:
             return [held]
-        return [i for i in (estado.get("automation") or {}).get("potionIds", []) if i in KNOWN_POTION_IDS]
+        return []
     return resolve
 
 
@@ -253,6 +257,7 @@ def ball_ids_resolver(estado: dict, ball_priority, ball_id):
             return [bid]
         ids = [i for i in (estado.get("automation") or {}).get("ballIds", []) if i in BUYABLE_BALL_IDS]
         if ids:
-            return ids
+            # Só a 1ª bola equipada na fila da automação.
+            return ids[:1]
         return [i for i in ball_priority if i in BUYABLE_BALL_IDS][:1]
     return resolve

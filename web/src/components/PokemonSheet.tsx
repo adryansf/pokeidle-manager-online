@@ -523,53 +523,125 @@ const loadSheet = (s: SheetSource) =>
   : s.kind === "public" ? teamApi.publicPokemon(s.nick, s.id)
   : teamApi.listing(s.id);
 
+const POTENCY_BONUS: Record<number, string> = {
+  1: "×1 (sem bônus)",
+  2: "+5% em todos os stats",
+  3: "+10% em todos os stats",
+  4: "+25% em todos os stats",
+  5: "+100% em todos os stats",
+};
+
 function formatForChatGpt(d: PokemonSheetPayload): string {
   const pk = d.pokemon;
   const sp = d.species;
-  const lines: string[] = [];
+  const titleName = pk?.nome || sp?.name || "Pokémon";
+  const lines: string[] = [
+    `# ${titleName} — ficha do PokeIdle`,
+    "",
+    "Ficha de um pokemon do PokeIdle, um MMO idle de pokemon. Os números são os do jogo, que tem regras próprias: use a regra de cálculo do fim desta ficha, e não a dos jogos oficiais.",
+  ];
+
   if (pk) {
-    lines.push(`# Pokémon (PokeIdle)`);
-    lines.push(`- **Nome:** ${pk.nome}${pk.shiny ? " ✨ (SHINY)" : ""}`);
-    if (pk.tipos?.length) lines.push(`- **Tipos:** ${pk.tipos.join(" / ")}`);
-    lines.push(`- **Nível:** ${pk.level}`);
-    if (pk.nota != null) lines.push(`- **Nota:** ${pk.nota}${d.calc?.faixa ? ` (${d.calc.faixa})` : ""}`);
-    if (pk.quality != null) lines.push(`- **Qualidade:** ${pk.quality}`);
-    if (pk.potencia != null) lines.push(`- **Potência:** P${pk.potencia}`);
+    const types = (pk.tipos?.length ? pk.tipos : [sp?.type1, sp?.type2].filter(Boolean)).join(" / ");
     const ivTotal = d.calc?.ivTotal ?? (pk.ivs ? Object.values(pk.ivs).reduce((a, b) => a + (Number(b) || 0), 0) : null);
-    if (ivTotal != null) lines.push(`- **IV Total:** ${ivTotal}/186`);
-    if (d.pvePower) lines.push(`- **Poder PVE:** ${nf.format(d.pvePower)}`);
-    if (d.pvpPower) lines.push(`- **Poder PVP:** ${nf.format(d.pvpPower)} (Nível PVP: ${d.pvpLevel})`);
-    if (d.combatHp) lines.push(`- **HP de Combate:** ${nf.format(d.combatHp)}`);
-    if (pk.tmElemental) lines.push(`- **TM Elemental:** ${pk.tmElemental}`);
-    if (pk.stats || pk.ivs) {
-      lines.push(`\n## Stats & IVs`);
-      for (const [key, label, ivKey] of STAT_LABEL) {
-        const st = pk.stats?.[key];
-        const iv = pk.ivs?.[ivKey];
-        const ref = pk.refino?.[key];
-        const extra = [iv != null ? `IV ${iv}` : null, ref ? `Refino +${ref}` : null].filter(Boolean).join(" · ");
-        lines.push(`- **${label}:** ${st != null ? nf.format(st) : "—"}${extra ? ` (${extra})` : ""}`);
+    const pot = pk.potencia ?? 1;
+    const potDesc = POTENCY_BONUS[pot] ? ` (${POTENCY_BONUS[pot]})` : "";
+    const faixaLabel = d.calc?.faixa ? d.calc.faixa.charAt(0).toUpperCase() + d.calc.faixa.slice(1) : "";
+
+    lines.push("", "## O pokemon", "");
+    lines.push(`- Espécie: ${sp?.name || pk.nome} (#${pk.speciesId})${types ? ` — ${types}` : ""}`);
+    lines.push(`- Shiny: ${pk.shiny ? "sim" : "não"}`);
+    lines.push(`- Nível: ${pk.level}`);
+    lines.push(`- Potência: P${pot}${potDesc}`);
+    if (pk.quality != null) lines.push(`- Qualidade: ${pk.quality}`);
+    if (ivTotal != null) lines.push(`- IV somado: ${ivTotal} de 192`);
+    if (d.calc?.lendario) {
+      lines.push(`- Nota da Calculadora: Lendário/Mítico (sem nota)`);
+    } else if (d.calc?.nota != null || pk.nota != null) {
+      const notaVal = d.calc?.nota ?? pk.nota;
+      lines.push(`- Nota da Calculadora: ${notaVal} de 10${faixaLabel ? ` (${faixaLabel})` : ""}`);
+    }
+    if (pk.poder != null) lines.push(`- Poder (⚔): ${nf.format(pk.poder)}`);
+    if (d.pvpPower) lines.push(`- Poder PVP: ${nf.format(d.pvpPower)} (Nível PVP: ${d.pvpLevel})`);
+    if (d.combatHp) lines.push(`- HP de combate: ${nf.format(d.combatHp)} (o HP do stat × 12)`);
+
+    // Tabela de Stats
+    const hasRefino = Boolean(pk.refino && Object.values(pk.refino).some((v) => (v ?? 0) > 0));
+    lines.push("", "## Stats", "");
+    if (hasRefino) {
+      lines.push(`| Stat | Base da espécie | Refino | IV (1–32) | Stat atual (nível ${pk.level}) |`);
+      lines.push("|---|---|---|---|---|");
+    } else {
+      lines.push(`| Stat | Base da espécie | IV (1–32) | Stat atual (nível ${pk.level}) |`);
+      lines.push("|---|---|---|---|");
+    }
+    let sumBase = 0;
+    let sumRef = 0;
+    let sumIv = 0;
+    let sumStat = 0;
+    let hasBase = false;
+    for (const [key, label, ivKey] of STAT_LABEL) {
+      const baseVal = d.bases?.[key] ?? (sp ? (sp[BASE_KEY[key]] as number | undefined) : undefined);
+      const refVal = pk.refino?.[key] ?? 0;
+      const ivVal = pk.ivs?.[ivKey];
+      const stVal = pk.stats?.[key];
+      if (typeof baseVal === "number") {
+        sumBase += baseVal;
+        hasBase = true;
+      }
+      sumRef += refVal;
+      if (typeof ivVal === "number") sumIv += ivVal;
+      if (typeof stVal === "number") sumStat += stVal;
+      if (hasRefino) {
+        lines.push(`| ${label} | ${baseVal ?? "—"} | ${refVal ? `+${refVal}` : "0"} | ${ivVal ?? "—"} | ${stVal != null ? nf.format(stVal) : "—"} |`);
+      } else {
+        lines.push(`| ${label} | ${baseVal ?? "—"} | ${ivVal ?? "—"} | ${stVal != null ? nf.format(stVal) : "—"} |`);
       }
     }
+    if (hasRefino) {
+      lines.push(`| Total | ${hasBase ? sumBase : "—"} | ${sumRef ? `+${sumRef}` : "0"} | ${sumIv} | ${nf.format(sumStat)} |`);
+    } else {
+      lines.push(`| Total | ${hasBase ? sumBase : "—"} | ${sumIv} | ${nf.format(sumStat)} |`);
+    }
+
+    lines.push("", "## TMs e Z-Move", "");
+    lines.push(`- Z-Move: ${pk.tmElemental ? pk.tmElemental : "nenhum (sem TM elemental)"}`);
+
     if (d.calc?.finais?.length) {
-      lines.push(`\n## Evoluções finais (Calculadora)`);
+      lines.push("", "## Evoluções finais", "");
       for (const f of d.calc.finais) {
-        lines.push(`- ${f.name}: nota ${f.nota} (${f.faixa})${f.mercado ? " · aceito no mercado" : ""}`);
+        const fx = f.faixa ? f.faixa.charAt(0).toUpperCase() + f.faixa.slice(1) : "";
+        lines.push(`- ${f.name}: nota ${f.nota} (${fx})${f.mercado ? " · aceito no mercado" : ""}`);
       }
     }
   }
-  if (sp) {
-    lines.push(`\n## Espécie: ${sp.name}`);
-    const types = [sp.type1, sp.type2].filter(Boolean).join(" / ");
-    if (types) lines.push(`- **Tipos:** ${types} · **Raridade:** ${sp.rarity} · **Alcance:** ${d.range}`);
-    if (sp.attacks?.length) {
-      lines.push(`- **Golpes:** ${sp.attacks.map((a) => `${a.name} (${a.type}, Pwr ${a.power}, CD ${(a.cooldownMs / 1000).toFixed(1)}s)`).join("; ")}`);
+
+  if (sp?.attacks?.length) {
+    lines.push("", "## Golpes da espécie", "");
+    for (const a of sp.attacks) {
+      lines.push(`- ${a.name} (${a.type}, ${a.category}, Poder ${a.power}, CD ${(a.cooldownMs / 1000).toFixed(1)}s)`);
     }
   }
+
   if (d.listing) {
-    lines.push(`\n## Anúncio no Mercado`);
-    lines.push(`- **Preço:** ${nf.format(d.listing.price)} ${d.listing.currency === "orb" ? "Gemas" : "Gold"} (anúncio #${d.listing.id})`);
+    lines.push("", "## Anúncio no Mercado", "");
+    lines.push(`- Preço: ${nf.format(d.listing.price)} ${d.listing.currency === "orb" ? "Gemas" : "Gold"} (anúncio #${d.listing.id})`);
   }
+
+  lines.push(
+    "",
+    "## Como o jogo calcula",
+    "",
+    "- Stat = (base + refino + 2 × IV) × (nível ÷ 100) × qualidade^expoente × potência × shiny × lendário",
+    "- Expoente da qualidade: 0.95 no HP e no SPD; 0.8 no ATK, DEF, SP.ATK e SP.DEF",
+    "- Potência: P1 ×1 · P2 ×1.05 · P3 ×1.1 · P4 ×1.25 · P5 ×2",
+    "- Shiny: ×3 em todos os stats",
+    "- Lendário ou Mítico: ×4 em todos os stats (vale pela espécie)",
+    "- IV: de 1 a 32 em cada stat (6 a 192 somados) · Qualidade: de 0.8 a 1.8",
+    "- O refino é o \"+N\" comprado com pedras: soma na base, antes do IV e de todo multiplicador.",
+    "- A Nota da Calculadora vai de 0 a 10 DENTRO da espécie: 0 é o pior nascimento possível dela, 10 é P5 + shiny + IV máximo. Evoluir nunca baixa a nota. Lendário não tem nota.",
+  );
+
   return lines.join("\n");
 }
 
