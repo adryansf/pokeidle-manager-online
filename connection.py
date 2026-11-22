@@ -28,6 +28,7 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 import config
 from balls import BallManager
 from config import AccountConfig, Settings
+from game_data import BALL_NAMES
 from hunt import HuntManager
 from inventory import InventoryView
 from battle_pass import PASSE_NIVEL_MIN, pode_resgatar
@@ -295,7 +296,7 @@ class AccountConnection:
         self._alert_state(state, reason)
 
     def _alert_state(self, state: State, reason: str) -> None:
-        """Avisa no Discord a queda (1x por queda) e a volta, com o tempo fora.
+        """Avisa a queda (1x por queda), o bloqueio inicial e a volta, com o tempo fora.
         Título = nick da conta (sem o prefixo ACCn: usado só nos logs)."""
         if state == State.PAUSED_MANUAL:
             self._cancel_down_timer()
@@ -307,6 +308,12 @@ class AccountConnection:
                     self.acc.nick, "🟢 Voltou ao ar.", GREEN,
                     [("Tempo fora", fmt_duration(time.time() - self._down_since), True)])
             self._was_online, self._down_since, self._down_alerted = True, None, False
+        elif state == State.BLOCKED and not self._was_online:
+            if not self._down_alerted:
+                self._down_alerted = True
+                self.notifier.send(
+                    self.acc.nick, "⛔ Conta bloqueada ao entrar.", RED,
+                    [("Motivo", reason or "Login bloqueado pelo jogo.", False)])
         elif state in (State.DISCONNECTED, State.PAUSED_COOLDOWN, State.BLOCKED) and self._was_online:
             if self._down_since is None:
                 self._down_since = time.time()
@@ -561,8 +568,6 @@ class AccountConnection:
                 return
 
     def _on_buy_error(self, kind: str, item_id: int, qty: int, reason: str) -> None:
-        from game_data import BALL_NAMES
-
         if kind == "ball":
             label = BALL_NAMES.get(item_id) or f"Bola #{item_id}"
         else:
@@ -631,11 +636,11 @@ class AccountConnection:
                 self.notifier.send(self.acc.nick, f"✨ {outcome} um shiny{label}!", GOLD)
 
     def _record_captures(self, msg: dict) -> None:
-        if not self.on_capture or msg.get("t") != "batalha":
+        if msg.get("t") != "batalha":
             return
         slug = (self.hunt.session.slug if self.hunt.session else None) or self.estado.get("huntSlug") or ""
         for ev in msg.get("ev", []):
-            if ev.get("k") != "bola":
+            if ev.get("k") != "bola" or (not self.on_capture and not ev.get("sucesso")):
                 continue
             slot = ev.get("slot")
             ls = self.hunt.live_slots.get(slot) if slot is not None else None
@@ -644,22 +649,42 @@ class AccountConnection:
             pid = (ls or {}).get("pokeId")
             look = (ls or {}).get("looktype")
             level = ev.get("level") if ev.get("level") is not None else (ls or {}).get("level")
-            if not name and slug:
-                h = next((x for x in self.hunts if isinstance(x, dict) and x.get("slug") == slug), None)
-                if h and (h.get("especies") or []):
-                    sp = h["especies"][0]
-                    name = sp.get("nome") or h.get("nome") or slug
-                    pid = pid or sp.get("pokeId")
+            hunt = next((x for x in self.hunts if isinstance(x, dict) and x.get("slug") == slug), None) if slug else None
+            species = (hunt or {}).get("especies") or []
+            if not name and len(species) == 1:
+                sp = species[0]
+                name = sp.get("nome")
+                pid = pid or sp.get("pokeId")
+            name = name or (f"Selvagem #{slot}" if slot is not None else "Pokémon")
+            shiny = bool(ev.get("shiny") or (ls or {}).get("shiny"))
+            # O rastreador já avisa a captura shiny quando há identificação por slot.
+            if ev.get("sucesso") and not (ev.get("shiny") is True and slot is not None):
+                if shiny or self.notifier.telegram_active:
+                    fields = []
+                    if level is not None:
+                        fields.append(("Nível", str(level), True))
+                    if ev.get("ballId") is not None:
+                        ball_id = ev["ballId"]
+                        fields.append(("Pokébola", BALL_NAMES.get(ball_id) or f"Bola #{ball_id}", True))
+                    if slug:
+                        fields.append(("Hunt", (hunt or {}).get("nome") or slug, False))
+                    if shiny:
+                        self.notifier.send(self.acc.nick, f"✨ Capturou um shiny **{name}**!", GOLD, fields)
+                    else:
+                        self.notifier.send(
+                            self.acc.nick, f"🎯 Capturou **{name}**!", GREEN, fields, targets={"telegram"})
+            if not self.on_capture:
+                continue
             try:
                 self.on_capture({
                     "ts": int(time.time() * 1000),
                     "account_id": self.acc.index,
                     "account_nick": self.acc.nick,
-                    "pokemon_name": name or (f"Selvagem #{slot}" if slot is not None else "Pokémon"),
+                    "pokemon_name": name,
                     "poke_id": pid,
                     "looktype": look or (60000 + int(pid) if pid and 1 <= int(pid) <= 1025 else None),
                     "level": level,
-                    "shiny": bool(ev.get("shiny") or (ls or {}).get("shiny")),
+                    "shiny": shiny,
                     "ball_id": ev.get("ballId"),
                     "success": bool(ev.get("sucesso")),
                     "chance": round((ev.get("chance") or 0) * 100, 1) if ev.get("chance") is not None else None,

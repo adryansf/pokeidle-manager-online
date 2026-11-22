@@ -342,6 +342,7 @@ def test_alert_notifies_once_per_listing(env, monkeypatch):
 
     run(go())
     assert len(sent) == 1 and "Cocoon Stone" in sent[0][0]
+    assert ("Conta da consulta", env.conn.acc.nick, True) in sent[0][3]
 
 
 def test_price_history_snapshot(env, monkeypatch):

@@ -204,6 +204,47 @@ def test_multi_gateway_telegram_and_discord():
     assert "• <b>Total no dia:</b> 2" in html_msg
 
 
+@pytest.mark.parametrize("telegram_enabled", [True, False])
+def test_capture_alerts_use_confirmed_results_and_keep_shiny_alert(conn, monkeypatch, telegram_enabled):
+    from notify import Notifier, embed_to_telegram_html
+
+    conn.notifier = Notifier("https://discord.example/api/webhooks/1/x",
+                             telegram_token="test", telegram_chat_id="12345",
+                             telegram_enabled=telegram_enabled)
+    monkeypatch.setattr(conn, "_save_session", lambda: None)
+    conn.estado["huntSlug"] = "tower"
+    conn.hunts = [{"slug": "tower", "nome": "Pokémon Tower"}]
+    shiny = {"k": "bola", "slot": 3, "nome": "Haunter", "sucesso": True, "shiny": True}
+    asyncio.run(conn._recv_loop(FakeWS([
+        {"t": "batalha", "ev": [{"k": "bola", "slot": 1, "nome": "Cubone", "sucesso": False}]},
+        {"t": "batalha", "ev": [{"k": "bola", "slot": 2, "nome": "Gastly", "sucesso": True,
+                               "level": 20, "ballId": 1}]},
+        {"t": "batalha", "ev": [shiny, shiny]},
+    ])))
+
+    if telegram_enabled:
+        capture = conn.notifier._queue.get_nowait()
+        assert capture["_targets"] == ["telegram"]
+        body = embed_to_telegram_html(capture["embeds"][0])
+        assert all(part in body for part in ("<b>Ash</b>", "Gastly", "20", "Poké Ball", "Pokémon Tower"))
+    shiny_alert = conn.notifier._queue.get_nowait()
+    assert "_targets" not in shiny_alert
+    assert "shiny **Haunter**" in shiny_alert["embeds"][0]["description"]
+    assert conn.notifier._queue.empty()
+
+
+def test_blocked_before_first_login_alerts_once_with_account(conn):
+    from notify import Notifier
+
+    conn.notifier = Notifier("", telegram_token="test", telegram_chat_id="12345")
+    for _ in range(2):
+        conn._alert_state(connection.State.BLOCKED, "Sessão inválida")
+    embed = conn.notifier._queue.get_nowait()["embeds"][0]
+    assert embed["title"] == "Ash"
+    assert embed["fields"][0]["value"] == "Sessão inválida"
+    assert conn.notifier._queue.empty()
+
+
 def test_external_login_wait_is_configurable():
     import config as cfg
     assert cfg.external_login_wait_s() == 300             # padrão: 5 min
@@ -214,3 +255,4 @@ def test_external_login_wait_is_configurable():
     cfg.set_external_login_wait_min(0)                     # nunca menos de 1 min (evita martelar o login)
     assert cfg.external_login_wait_s() == 60
     cfg.set_external_login_wait_min(5)
+

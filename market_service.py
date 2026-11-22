@@ -524,7 +524,8 @@ class MarketService:
                   for a in new[:5]]
         self.store.touch_rule(rule["id"])
         self.notifier.send(f"🛒 Alerta de mercado: {self.describe(spec)}", "\n".join(linhas), BLUE,
-                           [("Teto da regra", f"{thr:,} {moeda}".replace(",", "."), True)])
+                           [("Conta da consulta", conn.acc.nick, True),
+                            ("Teto da regra", f"{thr:,} {moeda}".replace(",", "."), True)])
 
     # ------------------------------------------------------------ sniper
     def _maybe_snipe(self, rule: dict, conn, listing: dict) -> None:

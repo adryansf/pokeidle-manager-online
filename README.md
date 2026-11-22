@@ -22,6 +22,7 @@ Gerenciador headless em Python (FastAPI + WebSockets) com dashboard web em React
 - **Múltiplos Gateways de Notificação (Discord e/ou Telegram):**
   - Envio de alertas em tempo real para **Discord** (Webhook), **Telegram** (Bot API em HTML) ou **ambos simultaneamente**, com chaves independentes para ativar/pausar cada gateway.
   - Alertas de queda/retorno de conta, captura/encontro de **Shiny**, drop de **Itens Raros**, compras do Sniper, oportunidades de venda acima da média, anúncios vendidos e **Relatório Diário** consolidado.
+  - O Telegram também avisa cada captura comum bem-sucedida. Os alertas identificam a conta pelo nick. Bloqueios no login são avisados mesmo antes de a conta entrar pela primeira vez.
 - **Mercado da Comunidade, Análise e Sniper:**
   - Visão geral de preços mínimos e médias de 7 dias (Gold e Gemas), vitrine de Pokémon com filtros avançados, histórico global com busca por sugestões e extrato de compras/vendas.
   - **Análise do Mercado (24h, 7d e 30d):** coleta contínua de vendas do servidor no SQLite local combinada ao histórico do `pokeidleguide.io` (com fallback automático), exibindo itens/Pokémons mais vendidos, mediana e quartis de preço, maiores altas/quedas, índice de inflação e horários de pico.
