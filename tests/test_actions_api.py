@@ -342,9 +342,12 @@ def test_manual_pause_and_resume(env):
     assert c.post(f"/api/accounts/{acc_id}/pause").status_code == 401
     r = c.post(f"/api/accounts/{acc_id}/pause", json={"paused": True}, headers=H)
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "paused": True, "state": "PAUSED_MANUAL"}
+    # Fora do Centro, a pausa primeiro manda a conta ao Pokécentro e só desconecta quando ela chega lá.
+    assert r.json() == {"ok": True, "paused": True, "state": "ONLINE"}
+    assert conn._pause_disconnect_when_center is True
+    assert [m["t"] for m in conn.hunt._ws.sent] == ["centro.ir"]
     snap = account_snapshot(conn)
-    assert snap["paused"] is True and snap["status"] == "paused_cooldown" and snap["state"] == "PAUSED_MANUAL"
+    assert snap["paused"] is True and snap["state"] == "ONLINE"
 
     r2 = c.post(f"/api/accounts/{acc_id}/pause", json={"paused": False}, headers=H)
     assert r2.status_code == 200
