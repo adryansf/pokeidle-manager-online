@@ -223,6 +223,20 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
     def guard(request: Request, tok: str | None):
         return auth.guard(request, tok)
 
+    def pin_manual_hunt(conn: AccountConnection, slug: str) -> bool:
+        """Troca manual (Mapa / Em massa) vira a hunt fixa da conta.
+
+        Sem isso o Auto-Hunt (ou a hunt fixa antiga) desfazia a troca em até 20 s, sem avisar.
+        Devolve True quando o Auto-Hunt foi desligado por causa da troca."""
+        was_auto = bool(conn.acc.auto_best_hunt)
+        if not was_auto and not conn.acc.hunt_slug:
+            return False  # modo manual: nada a reverter
+        if not was_auto and conn.acc.hunt_slug == slug:
+            return False
+        conn.acc = replace(conn.acc, hunt_slug=slug, auto_best_hunt=False)
+        store.update_account(conn.acc.index, {"options": {"hunt_slug": slug, "auto_best_hunt": False}})
+        return was_auto
+
     def conn_of(acc_id: int) -> AccountConnection | None:
         return manager.get(acc_id)
 
@@ -261,11 +275,13 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
             return JSONResponse({"error": "A conta está offline."}, status_code=409)
         if body.slug not in {h.get("slug") for h in conn.hunts if isinstance(h, dict)}:
             return JSONResponse({"error": "Hunt desconhecida para esta conta."}, status_code=400)
+        auto_off = pin_manual_hunt(conn, body.slug)
         # Em combate o jogo recusa a troca: entra na fila e o bot troca sozinho quando a trava acabar.
         wait = conn.combat_lock_ms()
         if wait > 0:
             conn.queue_hunt(body.slug)
-            return {"ok": True, "confirmed": False, "queued": True, "waitMs": wait, "slug": body.slug}
+            return {"ok": True, "confirmed": False, "queued": True, "waitMs": wait, "slug": body.slug,
+                    "autoHuntOff": auto_off}
         conn.queue_hunt(None)  # um pedido novo sem trava substitui qualquer fila antiga
         await conn.hunt.select_hunt(body.slug)
         # O envio não prova nada: quem confirma é o evento `hunt` do jogo (recusa em combate/nível não responde).
@@ -273,8 +289,8 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
             await asyncio.sleep(0.25)
             s = conn.hunt.session
             if s is not None and s.slug == body.slug:
-                return {"ok": True, "confirmed": True, "slug": body.slug}
-        return {"ok": True, "confirmed": False, "slug": body.slug}
+                return {"ok": True, "confirmed": True, "slug": body.slug, "autoHuntOff": auto_off}
+        return {"ok": True, "confirmed": False, "slug": body.slug, "autoHuntOff": auto_off}
 
     @app.post("/api/accounts/{acc_id}/outland-tier")
     async def select_outland_tier(acc_id: int, body: OutlandTierIn, request: Request,
@@ -753,6 +769,7 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
             sim_slug = (body.autoBestHuntSlug or "").strip()
             opts["auto_best_hunt_slug"] = sim_slug
             acc_changes["auto_best_hunt_slug"] = sim_slug or None
+            conn.note_sim_slug(sim_slug)
             conn._last_auto_hunt_at = 0.0
         if "autoPassClaim" in sent and body.autoPassClaim is not None:
             opts["auto_pass_claim"] = acc_changes["auto_pass_claim"] = bool(body.autoPassClaim)
@@ -887,10 +904,13 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
         sent: list[str] = []
         queued: list[str] = []
         skipped: list[str] = []
+        auto_off: list[str] = []
         for c in manager.connections():
             if not c.can_send or not any(h.get("slug") == body.slug for h in c.hunts if isinstance(h, dict)):
                 skipped.append(c.acc.nick)
                 continue
+            if pin_manual_hunt(c, body.slug):
+                auto_off.append(c.acc.nick)
             if c.combat_lock_ms() > 0:
                 c.queue_hunt(body.slug)
                 queued.append(c.acc.nick)
@@ -901,4 +921,4 @@ def register_action_routes(app: FastAPI, manager: "AccountManager", store: Store
                     sent.append(c.acc.nick)
                 except Exception:  # noqa: BLE001
                     skipped.append(c.acc.nick)
-        return {"ok": True, "sent": sent, "queued": queued, "skipped": skipped}
+        return {"ok": True, "sent": sent, "queued": queued, "skipped": skipped, "autoHuntOff": auto_off}

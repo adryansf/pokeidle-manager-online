@@ -86,6 +86,8 @@ BLOCKING_KEYS: dict[str, tuple[str, str]] = {
 }
 NETWORK_FULL_KEYS = {"login.limiteOnlineIp", "login.limiteOnlineIpLista"}
 NETWORK_FULL_RETRY_S = 30
+# Quantos níveis o Pokémon ativo pode subir antes de o slug do simulador do painel ser considerado obsoleto.
+SIM_SLUG_MAX_LEVEL_DRIFT = 25
 
 
 def friendly_reason(e: BaseException) -> str:
@@ -255,6 +257,8 @@ class AccountConnection:
         self._last_potion_fallback_at: float = 0.0
         self._last_auto_center_at: float = 0.0
         self._last_auto_hunt_at: float = 0.0
+        # Pokémon ativo (id, nível) para o qual o painel calculou `auto_best_hunt_slug`; None = desconhecido (ex.: após reiniciar).
+        self._sim_slug_ctx: tuple[int | None, int] | None = None
         self._last_pass_claim_at: float = 0.0
         self._auto_pass_claiming: bool = False
         self._center_return_slug: str | None = None
@@ -924,8 +928,38 @@ class AccountConnection:
         await self.hunt.go_to_center()
         log.info("[%s] combate livre: enviando centro.ir (farm pausado)", self.acc.name)
 
+    def _active_pokemon(self) -> dict | None:
+        active_id = self.estado.get("activeId")
+        if active_id is None:
+            return None
+        return next((p for p in self.estado.get("pokemons") or []
+                     if isinstance(p, dict) and p.get("id") == active_id), None)
+
+    def note_sim_slug(self, slug: str) -> None:
+        """Registra para qual Pokémon ativo o simulador do painel calculou a melhor hunt."""
+        pk = self._active_pokemon() or {}
+        self._sim_slug_ctx = (pk.get("id"), int(pk.get("level") or 0)) if slug else None
+
+    def _sim_slug_is_fresh(self) -> bool:
+        """O slug do simulador só vale para o Pokémon (e o nível) com que foi calculado.
+
+        Sem painel aberto ninguém recalcula: se o Pokémon ativo trocou ou subiu de nível desde o cálculo,
+        o slug fica obsoleto e a escolha volta para a heurística do servidor (que acompanha o nível do Pokémon)."""
+        ctx = self._sim_slug_ctx
+        if ctx is None:
+            return True  # sem contexto (reinício): confia no último cálculo salvo até o painel recalcular
+        pk = self._active_pokemon()
+        if pk is None:
+            return True
+        pid, lvl = ctx
+        return pk.get("id") == pid and int(pk.get("level") or 0) <= lvl + SIM_SLUG_MAX_LEVEL_DRIFT
+
     def _pick_best_hunt_for_level(self) -> dict | None:
-        """Escolhe a melhor hunt liberada pelo nível do treinador (respeitando região e prioridade)."""
+        """Escolhe a melhor hunt liberada pelo nível do treinador (respeitando região e prioridade).
+
+        Ordem: 1) a #1 do simulador do Mapa, se ainda válida para o Pokémon ativo; 2) heurística local que
+        limita a hunt ao nível do Pokémon ativo (o `nivel` da hunt é o nível dos selvagens), para a troca
+        acompanhar a progressão do Pokémon mesmo sem o painel aberto."""
         from maps import region_of_hunt
 
         level = int(self.estado.get("level") or 0)
@@ -947,7 +981,7 @@ class AccountConnection:
 
         # Se o simulador completo do Mapa já calculou a melhor hunt para a prioridade/região atual, usa ela!
         sim_slug = (self.acc.auto_best_hunt_slug or "").strip()
-        if sim_slug:
+        if sim_slug and self._sim_slug_is_fresh():
             matched = next((h for h in candidates if h.get("slug") == sim_slug), None)
             if matched is not None:
                 return matched
@@ -961,6 +995,13 @@ class AccountConnection:
                 non_outland = [h for h in candidates if (region_of_hunt(h) or "").lower() != "outland"]
                 if non_outland:
                     candidates = non_outland
+
+        # Não manda o Pokémon para selvagens de nível acima do dele (morre/não mata); sobe junto com ele.
+        pk = self._active_pokemon()
+        pk_level = int((pk or {}).get("level") or 0)
+        if pk_level > 0:
+            within = [h for h in candidates if int(h.get("nivel") or 0) <= pk_level]
+            candidates = within or [min(candidates, key=lambda h: int(h.get("nivel") or 0))]
 
         if priority == "shiny":
             candidates.sort(key=lambda h: (int(h.get("totalSpawns") or 0), int(h.get("nivel") or 0)), reverse=True)

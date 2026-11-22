@@ -73,8 +73,21 @@ def test_select_hunt_confirmed_by_game_event(env, monkeypatch):
     monkeypatch.setattr(actions_api, "HUNT_CONFIRM_TIMEOUT_S", 1.0)
     conn.hunt.session = HuntSession(slug="lapras")  # o jogo já confirmou (k:"hunt")
     r = c.post(f"/api/accounts/{acc_id}/hunt", json={"slug": "lapras"}, headers=H).json()
-    assert r == {"ok": True, "confirmed": True, "slug": "lapras"}
+    assert r == {"ok": True, "confirmed": True, "slug": "lapras", "autoHuntOff": False}
     assert conn.hunt._ws.sent == [{"t": "hunt.select", "slug": "lapras"}]
+
+
+def test_manual_hunt_switch_pins_hunt_and_disables_auto_hunt(env, monkeypatch):
+    """Sem isso o Auto-Hunt desfazia a troca feita no Mapa em até 20 s."""
+    from dataclasses import replace
+    c, conn, acc_id, store = env
+    monkeypatch.setattr(actions_api, "HUNT_CONFIRM_TIMEOUT_S", 0.25)
+    conn.acc = replace(conn.acc, auto_best_hunt=True)
+    r = c.post(f"/api/accounts/{acc_id}/hunt", json={"slug": "lapras"}, headers=H).json()
+    assert r["autoHuntOff"] is True
+    assert conn.acc.auto_best_hunt is False and conn.acc.hunt_slug == "lapras"
+    opts = store.get_account(acc_id)["options"]
+    assert opts["auto_best_hunt"] is False and opts["hunt_slug"] == "lapras"
 
 
 def test_select_hunt_not_confirmed_when_game_ignores(env, monkeypatch):

@@ -216,31 +216,54 @@ export default function App() {
 
   // Sincroniza o Auto-Hunt das contas online com o simulador real do Mapa (hunt-worker.js),
   // garantindo que "Retomar farm" e trocas automáticas levem exatamente para a #1 do Mapa.
+  // O snapshot chega a cada 1 s: o cálculo não pode ser cancelado a cada render (antes o resultado era
+  // descartado e a assinatura marcada como feita, então a hunt nunca acompanhava o nível do Pokémon).
   const syncedSigRef = useRef<Record<string, string>>({});
+  const inFlightRef = useRef<Record<string, string>>({});
+  const accountsRef = useRef(accounts);
+  accountsRef.current = accounts;
+  const mountedRef = useRef(true);
   useEffect(() => {
-    let alive = true;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  useEffect(() => {
     for (const id of ids) {
       const a = accounts[id];
       if (!a || a.status !== "online" || !a.automation?.autoBestHunt) continue;
       const prio = (a.automation.autoBestHuntPriority || "xp") as HuntOrder;
       const reg = a.automation.autoBestHuntRegion || "all";
       const sig = `${a.pokemon?.id ?? ""}|${a.pokemon?.level ?? ""}|${a.level}|${prio}|${reg}`;
-      if (syncedSigRef.current[id] === sig && a.automation.autoBestHuntSlug) continue;
-      syncedSigRef.current[id] = sig;
+      if (syncedSigRef.current[id] === sig || inFlightRef.current[id] === sig) continue;
+      inFlightRef.current[id] = sig;
       void computeBestHuntSlug(id, prio, reg)
         .then((res) => {
-          if (!alive || !res?.slug) return;
-          if (res.slug !== a.automation?.autoBestHuntSlug) {
-            void actions.setAutomation(id, { autoBestHuntSlug: res.slug });
+          if (!mountedRef.current) return;
+          syncedSigRef.current[id] = sig;
+          const cur = accountsRef.current[id]?.automation;
+          if (!cur?.autoBestHunt) return;
+          // Prioridade/região mudaram durante o cálculo: o próximo snapshot dispara um novo cálculo.
+          if ((cur.autoBestHuntPriority || "xp") !== prio || (cur.autoBestHuntRegion || "all") !== reg) return;
+          const slug = res?.slug ?? "";
+          if (slug !== (cur.autoBestHuntSlug || "")) {
+            void actions.setAutomation(id, { autoBestHuntSlug: slug }).catch(() => {
+              delete syncedSigRef.current[id];
+            });
           }
         })
         .catch(() => {
-          delete syncedSigRef.current[id];
+          // Falhou (worker/rede): espera 1 min antes de tentar de novo, sem martelar a cada snapshot.
+          syncedSigRef.current[id] = sig;
+          window.setTimeout(() => {
+            if (syncedSigRef.current[id] === sig) delete syncedSigRef.current[id];
+          }, 60_000);
+        })
+        .finally(() => {
+          if (inFlightRef.current[id] === sig) delete inFlightRef.current[id];
         });
     }
-    return () => {
-      alive = false;
-    };
   }, [ids, accounts]);
 
   useEffect(() => {

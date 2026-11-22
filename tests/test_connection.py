@@ -256,3 +256,52 @@ def test_external_login_wait_is_configurable():
     assert cfg.external_login_wait_s() == 60
     cfg.set_external_login_wait_min(5)
 
+
+# ------------------------------------------------------------------ Auto-Hunt
+from dataclasses import replace as _replace
+
+AUTO_HUNTS = [
+    {"slug": "rattata", "nome": "Rattata", "regiao": "kanto", "nivel": 10, "totalSpawns": 10},
+    {"slug": "geodude", "nome": "Geodude", "regiao": "kanto", "nivel": 100, "totalSpawns": 10},
+    {"slug": "onix", "nome": "Onix", "regiao": "kanto", "nivel": 400, "totalSpawns": 10},
+    {"slug": "tyranitar", "nome": "Tyranitar", "regiao": "johto", "nivel": 900, "totalSpawns": 10},
+]
+
+
+def _auto_conn(pk_level, trainer_level=1000, sim_slug=None):
+    c = AccountConnection(_replace(ACC, auto_best_hunt=True, auto_best_hunt_slug=sim_slug), SET)
+    c.hunts = AUTO_HUNTS
+    c.estado.update({"level": trainer_level, "activeId": 7, "pokemons": [{"id": 7, "level": pk_level}]})
+    return c
+
+
+def test_auto_hunt_follows_pokemon_level_without_simulator():
+    c = _auto_conn(pk_level=150)
+    assert c._pick_best_hunt_for_level()["slug"] == "geodude"
+    c.estado["pokemons"][0]["level"] = 450  # Pokémon evoluiu: a hunt acompanha
+    assert c._pick_best_hunt_for_level()["slug"] == "onix"
+
+
+def test_auto_hunt_weak_pokemon_gets_easiest_hunt():
+    c = _auto_conn(pk_level=5)
+    assert c._pick_best_hunt_for_level()["slug"] == "rattata"
+
+
+def test_auto_hunt_respects_trainer_level():
+    c = _auto_conn(pk_level=2000, trainer_level=450)
+    assert c._pick_best_hunt_for_level()["slug"] == "onix"
+
+
+def test_sim_slug_used_while_fresh_and_dropped_when_stale():
+    c = _auto_conn(pk_level=150, sim_slug="rattata")
+    assert c._pick_best_hunt_for_level()["slug"] == "rattata"  # sem contexto (reinício): confia no salvo
+    c.note_sim_slug("rattata")
+    assert c._pick_best_hunt_for_level()["slug"] == "rattata"
+    c.estado["pokemons"][0]["level"] = 150 + connection.SIM_SLUG_MAX_LEVEL_DRIFT + 1
+    assert c._pick_best_hunt_for_level()["slug"] == "geodude"  # subiu de nível sem recálculo
+    c.estado["pokemons"][0]["level"] = 150
+    c.estado["pokemons"].append({"id": 8, "level": 150})
+    c.note_sim_slug("rattata")
+    c.estado["activeId"] = 8  # trocou o Pokémon ativo
+    assert c._pick_best_hunt_for_level()["slug"] == "geodude"
+
