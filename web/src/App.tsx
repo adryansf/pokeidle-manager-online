@@ -1,5 +1,5 @@
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from "framer-motion";
-import { Bell, BookmarkCheck, Globe, Layers, LayoutDashboard, Map as MapIcon, MessagesSquare, Package, RotateCcw, Settings, Store, Swords, Target, Ticket } from "lucide-react";
+import { Bell, BookmarkCheck, Layers, LayoutDashboard, Map as MapIcon, MessagesSquare, Package, RotateCcw, Settings, Store, Swords, Target, Ticket } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccountCard, type CardDrag, type CardMode } from "@/components/AccountCard";
 import { BulkActionsModal } from "@/components/BulkActionsModal";
@@ -10,7 +10,6 @@ import { AccountSelect, InventoryView } from "@/components/InventoryView";
 import { MapaView } from "@/components/MapaView";
 import { MarketView } from "@/components/market/MarketView";
 import { PassView } from "@/components/PassView";
-import { ProxyCenterModal } from "@/components/ProxyCenter";
 import { PvpView } from "@/components/PvpView";
 import { NotificationsModal, SettingsView } from "@/components/SettingsView";
 import { SummaryBar } from "@/components/SummaryBar";
@@ -21,6 +20,7 @@ import { actions } from "@/lib/actions";
 import { admin } from "@/lib/admin";
 import { startChat, totalUnread, useChat } from "@/lib/chat";
 import { computeBestHuntSlug, type HuntOrder } from "@/lib/huntAdvisor";
+import { parseHash } from "@/lib/nav";
 import { useAccountIds, useAccountsMap } from "@/lib/telemetry";
 import { useCardOrder } from "@/lib/useCardOrder";
 
@@ -36,20 +36,25 @@ const TABS: { id: Tab; label: string; Icon: typeof Package }[] = [
   { id: "pvp", label: "PVP", Icon: Swords },
   { id: "config", label: "Configurações", Icon: Settings },
 ];
-/** Barra de baixo do celular, em duas fileiras. */
-const MOBILE_TABS: { id: Tab; label: string; Icon: typeof Package }[] = [
-  ...(["mapa", "colecao", "mercado"] as Tab[]).map((id) => TABS.find((t) => t.id === id)!),
+/** Barra de baixo do celular: duas fileiras de 5, com todas as abas (rótulos curtos para caber). */
+const MOBILE_SHORT: Partial<Record<Tab, string>> = { dashboard: "Painel", inventario: "Inventário", config: "Config." };
+type TabDef = { id: Tab; label: string; Icon: typeof Package };
+const MOBILE_TABS: TabDef[] = ([
+  ...(["mapa", "colecao", "mercado", "capturas"] as Tab[]).map((id) => TABS.find((t) => t.id === id)!),
   { id: "chat", label: "Chat", Icon: MessagesSquare },
-  ...(["dashboard", "inventario", "pvp", "config"] as Tab[]).map((id) => TABS.find((t) => t.id === id)!),
-];
+  ...(["dashboard", "inventario", "passe", "pvp", "config"] as Tab[]).map((id) => TABS.find((t) => t.id === id)!),
+] as TabDef[]).map((t) => ({ ...t, label: MOBILE_SHORT[t.id] ?? t.label }));
 const MODES: { id: CardMode; label: string }[] = [
   { id: "resumo", label: "Resumo" },
   { id: "sessao", label: "Sessão" },
 ];
 
 const EASE = [0.22, 1, 0.36, 1] as const;
-const readTab = (): Tab =>
-  location.hash === "#inventario" ? "inventario" : location.hash === "#colecao" ? "colecao" : location.hash === "#capturas" ? "capturas" : location.hash === "#mapa" ? "mapa" : location.hash === "#mercado" ? "mercado" : location.hash === "#passe" ? "passe" : location.hash === "#pvp" ? "pvp" : location.hash === "#config" ? "config" : location.hash === "#chat" ? "chat" : "dashboard";
+const HASH_TABS: Tab[] = ["inventario", "colecao", "capturas", "mapa", "mercado", "passe", "pvp", "config", "chat"];
+const readTab = (): Tab => {
+  const t = parseHash().tab as Tab;
+  return HASH_TABS.includes(t) ? t : "dashboard";
+};
 const TITLES: Record<Tab, string> = { dashboard: "Painel de Contas", inventario: "Inventários", colecao: "Coleção", capturas: "Histórico de Capturas", mapa: "Mapa", mercado: "Mercado", passe: "Passe de Batalha", pvp: "PVP", config: "Configurações", chat: "Chat" };
 
 function UnreadBadge() {
@@ -179,7 +184,6 @@ export default function App() {
   const [mode, setMode] = useState<CardMode>("resumo");
   const [notifyOpen, setNotifyOpen] = useState(false);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
-  const [proxyCenterOpen, setProxyCenterOpen] = useState(false);
 
   const refreshAlerts = useCallback(() => {
     admin
@@ -209,7 +213,8 @@ export default function App() {
       setResetBusy(false);
     }
   };
-  const [account, setAccount] = useState("all");
+  // Filtro de conta compartilhado por Inventários, Coleção e Capturas ("#capturas?conta=acc3" pré-seleciona).
+  const [account, setAccount] = useState(() => parseHash().account ?? "all");
   const ids = useAccountIds();
   const accounts = useAccountsMap();
   const online = ids.filter((i) => accounts[i]?.status === "online").length;
@@ -267,7 +272,15 @@ export default function App() {
   }, [ids, accounts]);
 
   useEffect(() => {
-    const on = () => setTab(readTab());
+    const on = () => {
+      const { tab: t, account: acc } = parseHash();
+      if (acc) {
+        setAccount(acc);
+        history.replaceState(null, "", `#${t}`); // limpa o ?conta= para não fixar o filtro ao recarregar
+      }
+      setTab(readTab());
+    };
+    on();
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
@@ -357,16 +370,6 @@ export default function App() {
                       </button>
                       <button
                         type="button"
-                        aria-label="Central de Proxies"
-                        className="btn"
-                        onClick={() => setProxyCenterOpen(true)}
-                        title="Gerenciar, testar e aplicar proxies nas contas"
-                      >
-                        <Globe className="size-4 text-poke-gold" aria-hidden />
-                        <span className="hidden sm:inline">Proxies</span>
-                      </button>
-                      <button
-                        type="button"
                         aria-label="Central de Notificações (Alertas, Discord e Telegram)"
                         className="btn relative"
                         onClick={() => setNotifyOpen(true)}
@@ -392,7 +395,7 @@ export default function App() {
                       </button>
                     </div>
                   </motion.div>
-                ) : tab === "inventario" || tab === "colecao" ? (
+                ) : tab === "inventario" || tab === "colecao" || tab === "capturas" ? (
                   <motion.div key="acc" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2, ease: EASE }}>
                     <AccountSelect value={account} onChange={setAccount} />
                   </motion.div>
@@ -412,7 +415,6 @@ export default function App() {
               />
             )}
           </AnimatePresence>
-          <AnimatePresence>{proxyCenterOpen && <ProxyCenterModal onClose={() => setProxyCenterOpen(false)} />}</AnimatePresence>
           <AnimatePresence>{bulkOpen && <BulkActionsModal onClose={() => setBulkOpen(false)} />}</AnimatePresence>
 
           <ConfirmDialog
@@ -442,7 +444,7 @@ export default function App() {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.25, ease: EASE }}
               >
-                {tab === "dashboard" ? <Dashboard mode={mode} /> : tab === "inventario" ? <InventoryView account={account} /> : tab === "colecao" ? <CollectionView account={account} /> : tab === "capturas" ? <CapturesView /> : tab === "mapa" ? <MapaView /> : tab === "mercado" ? <MarketView /> : tab === "passe" ? <PassView /> : tab === "pvp" ? <PvpView /> : tab === "chat" ? <ChatView /> : <SettingsView />}
+                {tab === "dashboard" ? <Dashboard mode={mode} /> : tab === "inventario" ? <InventoryView account={account} /> : tab === "colecao" ? <CollectionView account={account} /> : tab === "capturas" ? <CapturesView account={account} /> : tab === "mapa" ? <MapaView /> : tab === "mercado" ? <MarketView /> : tab === "passe" ? <PassView /> : tab === "pvp" ? <PvpView /> : tab === "chat" ? <ChatView /> : <SettingsView />}
               </motion.div>
             </AnimatePresence>
           </main>
@@ -454,11 +456,11 @@ export default function App() {
 
       <nav
         aria-label="Navegação"
-        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-12 border-t border-line bg-void/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-line bg-void/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden"
       >
-        {/* Duas fileiras de 4 botões (3 colunas de 12 cada). */}
+        {/* Duas fileiras de 5 botões: todas as abas ficam alcançáveis no celular. */}
         {MOBILE_TABS.map((t) => (
-          <MobileTabButton key={t.id} {...t} active={tab === t.id} onGo={go} span="col-span-3" />
+          <MobileTabButton key={t.id} {...t} active={tab === t.id} onGo={go} span="col-span-1" />
         ))}
       </nav>
     </MotionConfig>

@@ -2,6 +2,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity,
   Bot,
+  CalendarClock,
+  ExternalLink,
   Globe,
   HeartPulse,
   Package,
@@ -15,28 +17,30 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { CapturesView } from "@/components/CapturesView";
-import { ItemSprite, PokemonSprite, ShinyMark } from "@/components/Sprites";
+import { FeaturesTab } from "@/components/FeaturesTab";
+import { PokemonSprite, ShinyMark } from "@/components/Sprites";
 import { StatusPill } from "@/components/StatusPill";
-import { AnimatedNumber, Coin } from "@/components/ui";
-import { actions, useHuntCatalog, type AutomationPatch } from "@/lib/actions";
+import { actions, useHuntCatalog, type AutomationPatch, type Hunt } from "@/lib/actions";
+import { HUNT_PRIORITIES, HUNT_REGIONS, huntModeOf, type HuntMode } from "@/lib/automation";
 import { computeBestHuntSlug, type HuntOrder } from "@/lib/huntAdvisor";
 import { usePokemons } from "@/lib/api";
+import { goToTab } from "@/lib/nav";
 import { accountNumber, useSheet } from "@/lib/sheet";
 import { serverNow, useAccount } from "@/lib/telemetry";
-import type { TeamPokemon } from "@/lib/types";
-import { fmtDuration, fmtShort } from "@/lib/utils";
+import type { AccountAutomation, TeamPokemon } from "@/lib/types";
+import { usePauseToggle } from "@/lib/usePauseToggle";
+import { fmtShort } from "@/lib/utils";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-type DetailTab = "geral" | "equipe" | "automacao" | "inventario" | "capturas";
+export type DetailTab = "geral" | "equipe" | "automacao" | "rotinas";
 
+// Inventário e Capturas da conta ficam nas abas globais (filtradas pela conta): veja os atalhos da Visão Geral.
 const TABS: { id: DetailTab; label: string; Icon: typeof Activity }[] = [
   { id: "geral", label: "Visão Geral", Icon: Activity },
   { id: "equipe", label: "Equipe & Pokémons", Icon: Swords },
   { id: "automacao", label: "Automação", Icon: Bot },
-  { id: "inventario", label: "Inventário", Icon: Package },
-  { id: "capturas", label: "Capturas", Icon: Target },
+  { id: "rotinas", label: "Rotinas", Icon: CalendarClock },
 ];
 
 function hpColor(pct: number) {
@@ -56,35 +60,268 @@ function ToggleRow({
   checked,
   disabled,
   onToggle,
+  children,
 }: {
   label: string;
   desc: string;
   checked: boolean;
   disabled?: boolean;
   onToggle: () => void;
+  /** Ajustes que pertencem a este toggle (limiar/quantidade), mostrados logo abaixo dele. */
+  children?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-tile px-3.5 py-2.5">
-      <div className="min-w-0">
-        <div className="text-sm font-bold leading-tight text-fg">{label}</div>
-        <div className="mt-0.5 text-xs text-mute">{desc}</div>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        disabled={disabled}
-        onClick={onToggle}
-        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors disabled:opacity-50 ${
-          checked ? "border-[#2f6b3a] bg-[#24592f]" : "border-line bg-void"
-        }`}
-      >
-        <span
-          className={`inline-block size-4 rounded-full transition-transform ${
-            checked ? "translate-x-5 bg-poke-green" : "translate-x-1 bg-mute"
+    <div className="rounded-xl border border-line bg-tile px-3.5 py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-bold leading-tight text-fg">{label}</div>
+          <div className="mt-0.5 text-xs text-mute">{desc}</div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={checked}
+          aria-label={label}
+          disabled={disabled}
+          onClick={onToggle}
+          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors disabled:opacity-50 ${
+            checked ? "border-[#2f6b3a] bg-[#24592f]" : "border-line bg-void"
           }`}
+        >
+          <span
+            className={`inline-block size-4 rounded-full transition-transform ${
+              checked ? "translate-x-5 bg-poke-green" : "translate-x-1 bg-mute"
+            }`}
+          />
+        </button>
+      </div>
+      {children && <div className="mt-2.5 grid grid-cols-2 gap-2 border-t border-line/70 pt-2.5 sm:grid-cols-3">{children}</div>}
+    </div>
+  );
+}
+
+/**
+ * Campo numérico que aplica sozinho ao sair do campo (ou Enter), como os toggles: não há botão "Salvar".
+ * O valor mostrado acompanha a telemetria enquanto o campo não está em edição.
+ */
+function NumField({
+  label,
+  value,
+  min,
+  max,
+  suffix,
+  disabled,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max?: number;
+  suffix?: string;
+  disabled?: boolean;
+  onCommit: (n: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (!editing) setDraft(String(value));
+  }, [value, editing]);
+  const commit = () => {
+    setEditing(false);
+    let n = Number(draft === "" ? value : draft);
+    if (!Number.isFinite(n)) n = value;
+    n = Math.max(min, max != null ? Math.min(max, Math.round(n)) : Math.round(n));
+    setDraft(String(n));
+    if (n !== value) onCommit(n);
+  };
+  return (
+    <label className="block min-w-0 space-y-1">
+      <span className="block truncate text-[11px] font-bold text-mute">{label}</span>
+      <span className="relative block">
+        <input
+          className={`field w-full text-sm ${suffix ? "pr-7" : ""}`}
+          inputMode="numeric"
+          value={draft}
+          disabled={disabled}
+          onFocus={() => setEditing(true)}
+          onChange={(e) => setDraft(e.target.value.replace(/\D/g, ""))}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              setDraft(String(value));
+              e.stopPropagation();
+            }
+          }}
         />
-      </button>
+        {suffix && <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-mute">{suffix}</span>}
+      </span>
+    </label>
+  );
+}
+
+function AutoGroup({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-2">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <h3 className="text-xs font-bold uppercase tracking-wide text-poke-gold">{title}</h3>
+        {hint && <span className="text-[11px] text-mute">{hint}</span>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+const HUNT_MODES: { id: HuntMode; label: string; hint: string }[] = [
+  { id: "manual", label: "Manual", hint: "Fica na hunt atual. Troque pelo Mapa ou Em massa (a troca manual fixa a hunt)." },
+  { id: "fixa", label: "Fixa", hint: "Sempre volta para a hunt escolhida." },
+  { id: "auto", label: "Automática", hint: "Vai para a melhor hunt do simulador do Mapa e acompanha o nível do Pokémon." },
+];
+
+/** Um único controle para a hunt: Manual, Fixa ou Automática (exclusivos entre si). */
+function HuntModeSection({
+  accId,
+  auto,
+  online,
+  currentSlug,
+  hunts,
+  onMsg,
+}: {
+  accId: string;
+  auto: AccountAutomation;
+  online: boolean;
+  currentSlug: string | null;
+  hunts: Hunt[];
+  onMsg: (m: { tone: "ok" | "error"; text: string } | null) => void;
+}) {
+  const mode = huntModeOf(auto);
+  // "Fixa" escolhida sem hunt ainda: mostra o seletor e espera a escolha.
+  const [uiMode, setUiMode] = useState<HuntMode | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setUiMode(null), [mode]);
+  const shown = uiMode ?? mode;
+  const prio = auto.autoBestHuntPriority || "xp";
+  const reg = auto.autoBestHuntRegion || "all";
+  const nameOf = (slug?: string | null) => hunts.find((h) => h.slug === slug)?.nome ?? slug ?? "";
+
+  const apply = async (patch: AutomationPatch, okText: string) => {
+    setBusy(true);
+    onMsg(null);
+    try {
+      await actions.setAutomation(accId, patch);
+      onMsg({ tone: "ok", text: okText });
+    } catch (e) {
+      onMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao trocar o modo de hunt" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const applyAuto = async (p: string, r: string) => {
+    setBusy(true);
+    onMsg(null);
+    try {
+      const sim = online ? await computeBestHuntSlug(accId, p as HuntOrder, r).catch(() => null) : null;
+      await actions.setAutomation(accId, {
+        autoBestHunt: true,
+        autoBestHuntPriority: p,
+        autoBestHuntRegion: r,
+        ...(sim?.slug ? { autoBestHuntSlug: sim.slug } : {}),
+      });
+      onMsg({ tone: "ok", text: sim?.nome ? `Hunt automática ligada: melhor hunt agora é ${sim.nome}.` : "Hunt automática ligada." });
+    } catch (e) {
+      onMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao ligar a hunt automática" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pick = (m: HuntMode) => {
+    if (busy || m === shown) return;
+    if (m === "manual") {
+      setUiMode(null);
+      void apply({ autoBestHunt: false, huntSlug: "" }, "Modo manual: a conta fica onde está até você trocar pelo Mapa.");
+    } else if (m === "auto") {
+      setUiMode(null);
+      void applyAuto(prio, reg);
+    } else {
+      const slug = auto.huntSlug || currentSlug;
+      if (slug) void apply({ huntSlug: slug }, `Hunt fixa: ${nameOf(slug)}.`);
+      else setUiMode("fixa");
+    }
+  };
+
+  return (
+    <div className="space-y-2.5 rounded-xl border border-edge/60 bg-void/50 p-3">
+      <div className="flex rounded-xl border border-line bg-tile p-0.5" role="radiogroup" aria-label="Modo de hunt">
+        {HUNT_MODES.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            role="radio"
+            aria-checked={shown === m.id}
+            disabled={busy}
+            onClick={() => pick(m.id)}
+            className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-bold transition-colors disabled:opacity-60 sm:text-sm ${
+              shown === m.id ? "bg-poke-gold text-void" : "text-mute hover:text-fg"
+            }`}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-mute">{HUNT_MODES.find((m) => m.id === shown)?.hint}</p>
+
+      {shown === "fixa" && (
+        <label className="block space-y-1">
+          <span className="text-[11px] font-bold text-mute">Hunt fixa</span>
+          <select
+            className="field w-full text-xs sm:text-sm"
+            disabled={busy}
+            value={auto.huntSlug ?? ""}
+            onChange={(e) => e.target.value && void apply({ huntSlug: e.target.value }, `Hunt fixa: ${nameOf(e.target.value)}.`)}
+          >
+            <option value="" disabled>
+              — Escolha a hunt —
+            </option>
+            {hunts.map((h) => (
+              <option key={h.slug} value={h.slug}>
+                {h.nome} (Nv. {h.nivel} · {h.regiao || h.area})
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {shown === "auto" && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="block space-y-1">
+            <span className="text-[11px] font-bold text-mute">Prioridade</span>
+            <select className="field w-full text-xs sm:text-sm" disabled={busy} value={prio} onChange={(e) => void applyAuto(e.target.value, reg)}>
+              {HUNT_PRIORITIES.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block space-y-1">
+            <span className="text-[11px] font-bold text-mute">Região</span>
+            <select className="field w-full text-xs sm:text-sm" disabled={busy} value={reg} onChange={(e) => void applyAuto(prio, e.target.value)}>
+              {HUNT_REGIONS.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {auto.autoBestHuntSlug && (
+            <p className="text-xs text-mute sm:col-span-2">
+              Melhor hunt agora: <b className="text-fg">{nameOf(auto.autoBestHuntSlug)}</b>
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -219,74 +456,35 @@ function AllAccountPokemons({ accId, onOpenSheet }: { accId: string; onOpenSheet
   );
 }
 
+
 export function AccountDetailModal({
   accId,
   open,
   onClose,
   onOpenLive,
+  initialTab = "geral",
 }: {
   accId: string;
   open: boolean;
   onClose: () => void;
   onOpenLive: () => void;
+  /** Aba aberta ao abrir o modal (ex.: o resumo de automações do card abre direto em "automacao"). */
+  initialTab?: DetailTab;
 }) {
   const acc = useAccount(accId);
   const { data: huntCatalog } = useHuntCatalog(open ? accId : null);
   const openSheet = useSheet();
-  const [tab, setTab] = useState<DetailTab>("geral");
+  const pause = usePauseToggle(accId);
+  const [tab, setTab] = useState<DetailTab>(initialTab);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
-  const [autoDraft, setAutoDraft] = useState<{
-    hpLimiarPct: string;
-    potionThreshold: string;
-    potionQty: string;
-    ballThreshold: string;
-    ballQty: string;
-    reviveId: string;
-    reviveThreshold: string;
-    reviveQty: string;
-    goldReserve: string;
-    autoCenterHpPct: string;
-    huntSlug: string;
-    autoBestHuntRegion: string;
-    autoBestHuntPriority: string;
-  }>({
-    hpLimiarPct: "40",
-    potionThreshold: "10",
-    potionQty: "100",
-    ballThreshold: "10",
-    ballQty: "100",
-    reviveId: "205",
-    reviveThreshold: "5",
-    reviveQty: "20",
-    goldReserve: "0",
-    autoCenterHpPct: "20",
-    huntSlug: "",
-    autoBestHuntRegion: "all",
-    autoBestHuntPriority: "xp",
-  });
 
   useEffect(() => {
-    if (!open || !acc?.automation) return;
-    const a = acc.automation;
-    setAutoDraft({
-      hpLimiarPct: String(a.hpLimiarPct ?? (a.hpLimiar != null ? Math.round(a.hpLimiar * 100) : 40)),
-      potionThreshold: String(a.potionThreshold ?? 10),
-      potionQty: String(a.potionQty ?? 100),
-      ballThreshold: String(a.ballThreshold ?? 10),
-      ballQty: String(a.ballQty ?? 100),
-      reviveId: String(a.reviveId ?? 205),
-      reviveThreshold: String(a.reviveThreshold ?? 5),
-      reviveQty: String(a.reviveQty ?? 20),
-      goldReserve: String(a.goldReserve ?? 0),
-      autoCenterHpPct: String(a.autoCenterHpPct ?? 20),
-      huntSlug: a.huntSlug ?? "",
-      autoBestHuntRegion: a.autoBestHuntRegion ?? "all",
-      autoBestHuntPriority: a.autoBestHuntPriority ?? "xp",
-    });
-    // Sincroniza quando abre o modal ou muda de conta
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, accId]);
+    if (open) {
+      setTab(initialTab);
+      setMsg(null);
+    }
+  }, [open, initialTab]);
 
   useEffect(() => {
     if (!open) return;
@@ -304,9 +502,17 @@ export function AccountDetailModal({
   const team = acc.team ?? [];
   const auto = acc.automation;
   const accNum = accountNumber(accId);
+  const online = acc.status === "online";
+  const err = msg?.tone === "error" ? msg : pause.error ? { tone: "error" as const, text: pause.error } : null;
+  const shownMsg = err ?? msg;
 
   const openMonSheet = (monId: number, el: Element) => {
     openSheet({ kind: "own", account: accNum, id: monId }, el);
+  };
+
+  const goGlobal = (t: "inventario" | "capturas" | "mapa") => {
+    onClose();
+    goToTab(t, t === "mapa" ? undefined : accId);
   };
 
   const activateMon = async (monId: number) => {
@@ -325,28 +531,22 @@ export function AccountDetailModal({
     }
   };
 
-  const toggleAuto = async (key: string, patch: AutomationPatch) => {
+  /** Tudo na aba Automação aplica na hora pelo mesmo caminho (toggles ao clicar, números ao sair do campo). */
+  const applyAuto = async (key: string, patch: AutomationPatch, okText?: string) => {
     setBusyKey(key);
     setMsg(null);
     try {
       await actions.setAutomation(accId, patch);
+      if (okText) setMsg({ tone: "ok", text: okText });
     } catch (e) {
       setMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao atualizar automação" });
     } finally {
       setBusyKey(null);
     }
   };
-
-  const togglePause = async () => {
-    setBusyKey("pause");
-    setMsg(null);
-    try {
-      await actions.pause(accId, !acc.paused);
-    } catch (e) {
-      setMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao alterar pausa" });
-    } finally {
-      setBusyKey(null);
-    }
+  const flip = (key: keyof AutomationPatch & keyof AccountAutomation) => () => {
+    if (!auto) return;
+    void applyAuto(String(key), { [key]: !auto[key] } as AutomationPatch);
   };
 
   const sendCenter = async () => {
@@ -361,6 +561,8 @@ export function AccountDetailModal({
       setBusyKey(null);
     }
   };
+
+  const reviveName = auto?.reviveId === 206 ? "Max Revive" : "Revive";
 
   return createPortal(
     <AnimatePresence>
@@ -438,7 +640,7 @@ export function AccountDetailModal({
                     <Radio className="size-3.5 text-poke-red" aria-hidden />
                     Live
                   </button>
-                  {acc.status === "online" && (
+                  {online && (
                     <button
                       type="button"
                       disabled={busyKey === "center" || (acc.combatLockMs ?? 0) > 0}
@@ -451,16 +653,20 @@ export function AccountDetailModal({
                   )}
                   <button
                     type="button"
-                    disabled={busyKey === "pause"}
-                    onClick={() => void togglePause()}
+                    disabled={pause.busy}
+                    title={pause.title}
+                    onClick={() => {
+                      setMsg(null);
+                      void pause.toggle();
+                    }}
                     className={`btn px-2.5 py-1.5 text-xs font-bold ${
-                      acc.paused
+                      pause.paused
                         ? "border-[#2f6b3a] bg-[#16301c] text-poke-green"
                         : "border-[#7a5a1c] bg-[#33260e] text-poke-gold"
                     }`}
                   >
-                    {acc.paused ? <Play className="size-3.5" aria-hidden /> : <Pause className="size-3.5" aria-hidden />}
-                    {acc.paused ? "Retomar" : "Pausar"}
+                    {pause.paused ? <Play className="size-3.5" aria-hidden /> : <Pause className="size-3.5" aria-hidden />}
+                    {pause.label}
                   </button>
                   <button type="button" onClick={onClose} aria-label="Fechar" className="btn p-1.5 text-mute hover:text-fg">
                     <X className="size-4" aria-hidden />
@@ -492,19 +698,19 @@ export function AccountDetailModal({
 
             {/* Conteúdo rolável */}
             <div className="flex-1 space-y-4 overflow-y-auto p-3.5 sm:p-5">
-              {msg && (
+              {shownMsg && (
                 <div
                   className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
-                    msg.tone === "ok"
+                    shownMsg.tone === "ok"
                       ? "border-[#2f6b3a] bg-[#16301c] text-poke-green"
                       : "border-[#7a2f27] bg-[#32140f] text-poke-red"
                   }`}
                 >
-                  {msg.text}
+                  {shownMsg.text}
                 </div>
               )}
 
-              {/* ABA 1: VISÃO GERAL */}
+              {/* ABA 1: VISÃO GERAL (só o que o card não mostra) */}
               {tab === "geral" && (
                 <div className="space-y-4">
                   {/* Pokémon Ativo + HP */}
@@ -545,68 +751,32 @@ export function AccountDetailModal({
                     </div>
                   </section>
 
-                  {/* Métricas */}
-                  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-                    <div className="tile p-3">
-                      <div className="text-[11px] font-bold uppercase text-mute">Gold</div>
-                      <div className="mt-1 flex items-center gap-1.5 text-base font-extrabold">
-                        <Coin kind="gold" size={18} />
-                        <AnimatedNumber value={acc.gold} />
-                      </div>
-                    </div>
-                    <div className="tile p-3">
-                      <div className="text-[11px] font-bold uppercase text-mute">Gemas</div>
-                      <div className="mt-1 flex items-center gap-1.5 text-base font-extrabold">
-                        <Coin kind="gem" size={18} />
-                        <AnimatedNumber value={acc.gems} />
-                      </div>
-                    </div>
-                    <div className="tile p-3">
-                      <div className="text-[11px] font-bold uppercase text-mute">XP / hora</div>
-                      <div className="mt-1 text-base font-extrabold text-poke-green">
-                        +<AnimatedNumber value={acc.xpPerHour} />
-                      </div>
-                    </div>
-                    <div className="tile p-3">
-                      <div className="text-[11px] font-bold uppercase text-mute">Ouro / hora</div>
-                      <div className="mt-1 text-base font-extrabold text-poke-gold">
-                        +<AnimatedNumber value={acc.goldPerHour} />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Conexão & Proxy */}
+                  {/* Conexão & Sessão */}
                   <div className="grid gap-2.5 sm:grid-cols-2">
-                    <div className="rounded-xl border border-line bg-void/50 p-3 text-xs space-y-1">
-                      <div className="font-bold uppercase tracking-wide text-mute">Conexão & Proxy</div>
-                      <div>
-                        Proxy:{" "}
-                        <b className="text-fg">
-                          {acc.proxy ? `${acc.proxy.name} (${acc.proxy.scheme}://${acc.proxy.host}:${acc.proxy.port})` : "Direto (IP do servidor)"}
-                        </b>
-                      </div>
-                      {acc.proxy?.exitIp && (
+                    <div className="space-y-1 rounded-xl border border-line bg-void/50 p-3 text-xs">
+                      <div className="font-bold uppercase tracking-wide text-mute">Conexão</div>
+                      {acc.proxy ? (
                         <div>
-                          IP de saída: <b className="tnum text-poke-green">{acc.proxy.exitIp}</b>
+                          Proxy: <b className="text-fg">{`${acc.proxy.scheme}://${acc.proxy.host}:${acc.proxy.port}`}</b>
+                          {acc.proxy.exitIp && (
+                            <>
+                              {" "}· IP de saída <b className="tnum text-poke-green">{acc.proxy.exitIp}</b>
+                            </>
+                          )}
                         </div>
+                      ) : (
+                        <div>Sem proxy (IP do servidor).</div>
                       )}
-                      {acc.lastReason && (
-                        <div className="text-poke-gold">Último aviso: {acc.lastReason}</div>
-                      )}
+                      {acc.lastReason ? <div className="text-poke-gold">Último aviso: {acc.lastReason}</div> : <div className="text-mute">Sem avisos recentes.</div>}
                     </div>
-                    <div className="rounded-xl border border-line bg-void/50 p-3 text-xs space-y-1">
-                      <div className="font-bold uppercase tracking-wide text-mute">Hunt & Sessão</div>
-                      <div>
-                        Hunt: <b className="text-fg">{acc.huntName ?? acc.hunt?.slug ?? "—"}</b>
-                        {acc.hunt && ` · ${fmtShort(acc.hunt.kills)} abates · ${fmtDuration(acc.hunt.minutes)}`}
-                      </div>
+                    <div className="space-y-1 rounded-xl border border-line bg-void/50 p-3 text-xs">
+                      <div className="font-bold uppercase tracking-wide text-mute">Sessão</div>
                       <div>
                         Tempo de sessão: <b className="tnum text-fg">{fmtSessionClock(acc.session?.startedAt)}</b>
                       </div>
                       {acc.captured && (
                         <div>
-                          Pokémons: <b className="tnum text-fg">{fmtShort(acc.captured.total)}</b> · Sessão:{" "}
-                          <b className="tnum text-poke-green">{acc.captured.session}</b> capturados /{" "}
+                          Capturas na sessão: <b className="tnum text-poke-green">{acc.captured.session}</b> ·{" "}
                           <b className="tnum text-poke-red">{acc.captured.failed}</b> falhas
                         </div>
                       )}
@@ -615,7 +785,7 @@ export function AccountDetailModal({
 
                   {/* Boosts ativos */}
                   {acc.boosts && acc.boosts.length > 0 && (
-                    <div className="rounded-xl border border-[#7a5a1c]/70 bg-[#2a1f0b]/50 p-3 space-y-2">
+                    <div className="space-y-2 rounded-xl border border-[#7a5a1c]/70 bg-[#2a1f0b]/50 p-3">
                       <div className="text-xs font-bold uppercase tracking-wide text-poke-gold">
                         ⚡ Boosts Ativos ({acc.boosts.length})
                       </div>
@@ -655,6 +825,20 @@ export function AccountDetailModal({
                       </div>
                     </div>
                   )}
+
+                  {/* Atalhos para as abas globais, já filtradas por esta conta */}
+                  <div className="flex flex-wrap gap-1.5">
+                    <button type="button" className="btn text-xs font-bold" onClick={() => goGlobal("inventario")}>
+                      <Package className="size-3.5 text-poke-gold" aria-hidden />
+                      Inventário desta conta
+                      <ExternalLink className="size-3 text-mute" aria-hidden />
+                    </button>
+                    <button type="button" className="btn text-xs font-bold" onClick={() => goGlobal("capturas")}>
+                      <Target className="size-3.5 text-poke-gold" aria-hidden />
+                      Capturas desta conta
+                      <ExternalLink className="size-3 text-mute" aria-hidden />
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -674,7 +858,7 @@ export function AccountDetailModal({
                           <TeamCard
                             key={m.id ?? idx}
                             mon={m}
-                            online={acc.status === "online"}
+                            online={online}
                             activating={busyKey === `active:${m.id}`}
                             onActivate={activateMon}
                             onOpenSheet={openMonSheet}
@@ -697,403 +881,162 @@ export function AccountDetailModal({
                 </div>
               )}
 
-              {/* ABA 3: AUTOMAÇÃO */}
+              {/* ABA 3: AUTOMAÇÃO (fonte única das automações da conta) */}
               {tab === "automacao" && (
                 <div className="space-y-4">
                   <p className="text-xs text-mute">
-                    Todas as alterações aqui são aplicadas <b>em tempo real</b> sem desconectar a conta.
+                    Tudo aqui vale <b className="text-fg">na hora</b>, sem desconectar a conta: os botões ao clicar e os números ao sair do campo (ou Enter).
                   </p>
                   {auto ? (
                     <>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <ToggleRow
-                          label="Captura automática"
-                          desc="Lança Pokébolas automaticamente nos selvagens derrotados (não precisa de VIP)."
-                          checked={auto.autoCatch}
-                          disabled={busyKey === "autoCatch"}
-                          onToggle={() => void toggleAuto("autoCatch", { autoCatch: !auto.autoCatch })}
+                      <AutoGroup title="Hunt">
+                        <HuntModeSection
+                          accId={accId}
+                          auto={auto}
+                          online={online}
+                          currentSlug={acc.hunt?.slug ?? null}
+                          hunts={huntCatalog?.hunts ?? []}
+                          onMsg={setMsg}
                         />
-                        <ToggleRow
-                          label={`Cura automática no jogo (≤ ${auto.hpLimiarPct ?? 40}% HP)`}
-                          desc="Usa a poção equipada automaticamente quando o HP cair abaixo da % definida."
-                          checked={auto.gameAutoPotion}
-                          disabled={busyKey === "gameAutoPotion" || acc.status !== "online"}
-                          onToggle={() => void toggleAuto("gameAutoPotion", { gameAutoPotion: !auto.gameAutoPotion })}
-                        />
-                        <ToggleRow
-                          label="Usar Revive ao desmaiar (jogo)"
-                          desc="Ativa/desativa o uso automático de Revive quando o Pokémon desmaiar."
-                          checked={Boolean(auto.gameAutoRevive)}
-                          disabled={busyKey === "gameAutoRevive" || acc.status !== "online"}
-                          onToggle={() => void toggleAuto("gameAutoRevive", { gameAutoRevive: !auto.gameAutoRevive })}
-                        />
-                        <ToggleRow
-                          label={`Autocompra de Revive (< ${auto.reviveThreshold ?? 5} → +${auto.reviveQty ?? 20})`}
-                          desc={`Compra ${auto.reviveQty ?? 20}× ${auto.reviveId === 206 ? "Max Revive" : "Revive"} quando o estoque ficar abaixo de ${auto.reviveThreshold ?? 5}${auto.goldReserve > 0 ? ` · piso ${fmtShort(auto.goldReserve)}g` : ""}.`}
-                          checked={Boolean(auto.autoReviveRestock)}
-                          disabled={busyKey === "autoReviveRestock"}
-                          onToggle={() => void toggleAuto("autoReviveRestock", { autoReviveRestock: !auto.autoReviveRestock })}
-                        />
-                        <ToggleRow
-                          label="Resgate automático do Passe de Batalha"
-                          desc="Resgata automaticamente os prêmios diários do Passe de Batalha assim que virar o dia."
-                          checked={Boolean(auto.autoPassClaim)}
-                          disabled={busyKey === "autoPassClaim"}
-                          onToggle={() => void toggleAuto("autoPassClaim", { autoPassClaim: !auto.autoPassClaim })}
-                        />
-                        <ToggleRow
-                          label="Voltar automático à hunt (jogo)"
-                          desc="Configuração nativa do servidor: ao morrer e curar no Centro Pokémon, volta automaticamente para a hunt. É desligada automaticamente ao usar Pausar farm."
-                          checked={Boolean(auto.autoVoltarHunt)}
-                          disabled={busyKey === "autoVoltarHunt" || acc.status !== "online"}
-                          onToggle={() => void toggleAuto("autoVoltarHunt", { autoVoltarHunt: !auto.autoVoltarHunt })}
-                        />
-                        <ToggleRow
-                          label={`Autocompra de Poções (< ${auto.potionThreshold} → +${auto.potionQty})`}
-                          desc={`Compra ${auto.potionQty} un. quando o estoque ficar abaixo de ${auto.potionThreshold}${auto.goldReserve > 0 ? ` · piso ${fmtShort(auto.goldReserve)}g` : ""}.`}
-                          checked={auto.autoPotion}
-                          disabled={busyKey === "autoPotion"}
-                          onToggle={() => void toggleAuto("autoPotion", { autoPotion: !auto.autoPotion })}
-                        />
-                        <ToggleRow
-                          label={`Autocompra de Pokébolas (< ${auto.ballThreshold} → +${auto.ballQty})`}
-                          desc={`Compra ${auto.ballQty} un. quando o estoque ficar abaixo de ${auto.ballThreshold}${auto.goldReserve > 0 ? ` · piso ${fmtShort(auto.goldReserve)}g` : ""}.`}
-                          checked={auto.autoBallRestock}
-                          disabled={busyKey === "autoBallRestock"}
-                          onToggle={() => void toggleAuto("autoBallRestock", { autoBallRestock: !auto.autoBallRestock })}
-                        />
-                        <ToggleRow
-                          label="Fallback automático de Poção"
-                          desc="Se a poção equipada zerar, troca para a próxima poção disponível na mochila."
-                          checked={auto.autoPotionFallback}
-                          disabled={busyKey === "autoPotionFallback"}
-                          onToggle={() =>
-                            void toggleAuto("autoPotionFallback", { autoPotionFallback: !auto.autoPotionFallback })
-                          }
-                        />
-                        <ToggleRow
-                          label={`Auto-Centro de emergência (≤ ${auto.autoCenterHpPct}% HP)`}
-                          desc="Vai ao Centro Pokémon se ficar sem poções e o HP cair demais."
-                          checked={auto.autoCenter}
-                          disabled={busyKey === "autoCenter"}
-                          onToggle={() => void toggleAuto("autoCenter", { autoCenter: !auto.autoCenter })}
-                        />
-                        <ToggleRow
-                          label="PVP Ranqueado automático"
-                          desc="Entra automaticamente na fila do PVP ranqueado."
-                          checked={auto.pvpAuto}
-                          disabled={busyKey === "pvpAuto"}
-                          onToggle={() => void toggleAuto("pvpAuto", { pvpAuto: !auto.pvpAuto })}
-                        />
-                        <ToggleRow
-                          label="Auto-Melhor Hunt (ao subir de nível)"
-                          desc="Troca automaticamente para a melhor hunt liberada conforme o treinador upa."
-                          checked={Boolean(auto.autoBestHunt)}
-                          disabled={busyKey === "autoBestHunt"}
-                          onToggle={() => void toggleAuto("autoBestHunt", { autoBestHunt: !auto.autoBestHunt })}
-                        />
-                      </div>
+                      </AutoGroup>
 
-                      {/* Controle de Hunt Específica & Auto-Hunt */}
-                      <div className="space-y-3 rounded-xl border border-edge/60 bg-void/50 p-3.5">
-                        <h3 className="text-xs font-bold uppercase tracking-wide text-poke-gold">
-                          Hunt Específica & Auto-Hunt
-                        </h3>
-
-                        <div className="grid gap-2.5 sm:grid-cols-2">
-                          <label className="block space-y-1">
-                            <span className="text-[11px] font-bold text-mute">
-                              Hunt fixa / específica (mantém sempre esta hunt)
-                            </span>
-                            <div className="flex gap-1.5">
-                              <select
-                                className="field flex-1 text-xs sm:text-sm"
-                                value={autoDraft.huntSlug}
-                                onChange={(e) => setAutoDraft({ ...autoDraft, huntSlug: e.target.value })}
-                              >
-                                <option value="">— Nenhuma (troca manual ou Auto-Hunt) —</option>
-                                {(huntCatalog?.hunts ?? []).map((h) => (
-                                  <option key={h.slug} value={h.slug}>
-                                    {h.nome} (Nv. {h.nivel} · {h.regiao || h.area})
-                                  </option>
-                                ))}
-                              </select>
-                              <button
-                                type="button"
-                                disabled={busyKey === "huntSlug"}
-                                onClick={async () => {
-                                  setBusyKey("huntSlug");
-                                  setMsg(null);
-                                  try {
-                                    await actions.setAutomation(accId, { huntSlug: autoDraft.huntSlug });
-                                    setMsg({
-                                      tone: "ok",
-                                      text: autoDraft.huntSlug
-                                        ? `Hunt fixa definida: ${autoDraft.huntSlug}.`
-                                        : "Hunt fixa removida.",
-                                    });
-                                  } catch (e) {
-                                    setMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao definir hunt" });
-                                  } finally {
-                                    setBusyKey(null);
-                                  }
-                                }}
-                                className="btn shrink-0 px-2.5 text-xs font-bold"
-                              >
-                                Aplicar
-                              </button>
-                            </div>
-                          </label>
-
-                          <div className="space-y-2">
-                            <div className="grid gap-2 sm:grid-cols-2">
-                              <label className="block space-y-1">
-                                <span className="text-[11px] font-bold text-mute">
-                                  Prioridade do Auto-Hunt
-                                </span>
-                                <select
-                                  className="field w-full text-xs sm:text-sm"
-                                  value={autoDraft.autoBestHuntPriority}
-                                  onChange={(e) => setAutoDraft({ ...autoDraft, autoBestHuntPriority: e.target.value })}
-                                >
-                                  <option value="xp">XP/h (Pokémon)</option>
-                                  <option value="xpTreinador">XP/h (Treinador)</option>
-                                  <option value="ouro">Ouro/h</option>
-                                  <option value="shiny">Shiny/h</option>
-                                  <option value="fragmento">Fragmento/h</option>
-                                </select>
-                              </label>
-                              <label className="block space-y-1">
-                                <span className="text-[11px] font-bold text-mute">
-                                  Região do Auto-Hunt
-                                </span>
-                                <select
-                                  className="field w-full text-xs sm:text-sm"
-                                  value={autoDraft.autoBestHuntRegion}
-                                  onChange={(e) => setAutoDraft({ ...autoDraft, autoBestHuntRegion: e.target.value })}
-                                >
-                                  <option value="all">Todas as regiões</option>
-                                  <option value="kanto">Kanto</option>
-                                  <option value="outland">Outland</option>
-                                  <option value="johto">Johto</option>
-                                  <option value="hoenn">Hoenn</option>
-                                  <option value="sinnoh">Sinnoh</option>
-                                  <option value="unova">Unova</option>
-                                  <option value="kalos">Kalos</option>
-                                  <option value="alola">Alola</option>
-                                  <option value="galar">Galar</option>
-                                  <option value="paldea">Paldea</option>
-                                  <option value="orre">Orre</option>
-                                </select>
-                              </label>
-                            </div>
-                            <button
-                              type="button"
-                              disabled={busyKey === "autoBestHuntRegion"}
-                              onClick={async () => {
-                                setBusyKey("autoBestHuntRegion");
-                                setMsg(null);
-                                try {
-                                  const sim = acc.status === "online"
-                                    ? await computeBestHuntSlug(
-                                        accId,
-                                        autoDraft.autoBestHuntPriority as HuntOrder,
-                                        autoDraft.autoBestHuntRegion,
-                                      ).catch(() => null)
-                                    : null;
-                                  await actions.setAutomation(accId, {
-                                    autoBestHunt: true,
-                                    autoBestHuntRegion: autoDraft.autoBestHuntRegion,
-                                    autoBestHuntPriority: autoDraft.autoBestHuntPriority,
-                                    ...(sim?.slug ? { autoBestHuntSlug: sim.slug } : {}),
-                                  });
-                                  setMsg({
-                                    tone: "ok",
-                                    text: sim?.nome
-                                      ? `Auto-Hunt ativado! Melhor hunt calculada: ${sim.nome}.`
-                                      : "Auto-Melhor Hunt atualizado e ativado!",
-                                  });
-                                } catch (e) {
-                                  setMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao atualizar Auto-Hunt" });
-                                } finally {
-                                  setBusyKey(null);
-                                }
-                              }}
-                              className="btn w-full px-2.5 text-xs font-bold"
-                            >
-                              Salvar e ativar Auto-Hunt
-                            </button>
-                          </div>
+                      <AutoGroup title="Combate">
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <ToggleRow
+                            label={`Cura automática no jogo (≤ ${auto.hpLimiarPct ?? 40}% HP)`}
+                            desc={online ? "Usa a poção equipada quando o HP cair abaixo da % (ajuste em Avançado)." : "Precisa da conta online."}
+                            checked={auto.gameAutoPotion}
+                            disabled={busyKey === "gameAutoPotion" || !online}
+                            onToggle={flip("gameAutoPotion")}
+                          />
+                          <ToggleRow
+                            label="Usar Revive ao desmaiar (jogo)"
+                            desc={online ? `Usa ${reviveName} automaticamente quando o Pokémon desmaiar.` : "Precisa da conta online."}
+                            checked={Boolean(auto.gameAutoRevive)}
+                            disabled={busyKey === "gameAutoRevive" || !online}
+                            onToggle={flip("gameAutoRevive")}
+                          />
+                          <ToggleRow
+                            label="Fallback de poção"
+                            desc="Se a poção equipada zerar, troca para a próxima poção da mochila."
+                            checked={auto.autoPotionFallback}
+                            disabled={busyKey === "autoPotionFallback"}
+                            onToggle={flip("autoPotionFallback")}
+                          />
+                          <ToggleRow
+                            label={`Auto-Centro de emergência (≤ ${auto.autoCenterHpPct}% HP)`}
+                            desc="Vai ao Centro Pokémon se ficar sem poções e o HP cair demais."
+                            checked={auto.autoCenter}
+                            disabled={busyKey === "autoCenter"}
+                            onToggle={flip("autoCenter")}
+                          />
                         </div>
-                      </div>
+                      </AutoGroup>
 
-                      {/* Ajuste numérico de % de cura e quantidades de recompra */}
-                      <div className="space-y-3 rounded-xl border border-edge/60 bg-void/50 p-3.5">
-                        <h3 className="text-xs font-bold uppercase tracking-wide text-poke-gold">
-                          Limiares & Quantidades (aplica em tempo real)
-                        </h3>
+                      <AutoGroup
+                        title="Loja / reposição"
+                        hint={auto.goldReserve > 0 ? `Não compra com menos de ${fmtShort(auto.goldReserve)} gold (Avançado).` : "Sem piso de gold (Avançado)."}
+                      >
+                        <div className="space-y-2">
+                          <ToggleRow
+                            label="Repor poções"
+                            desc={`Compra ${auto.potionQty} un. quando o estoque ficar abaixo de ${auto.potionThreshold}.`}
+                            checked={auto.autoPotion}
+                            disabled={busyKey === "autoPotion"}
+                            onToggle={flip("autoPotion")}
+                          >
+                            <NumField label="Repor abaixo de" value={auto.potionThreshold} min={0} onCommit={(n) => void applyAuto("potionThreshold", { potionThreshold: n })} />
+                            <NumField label="Comprar (qtd)" value={auto.potionQty} min={1} onCommit={(n) => void applyAuto("potionQty", { potionQty: n })} />
+                          </ToggleRow>
+                          <ToggleRow
+                            label="Repor Pokébolas"
+                            desc={`Compra ${auto.ballQty} un. quando o estoque ficar abaixo de ${auto.ballThreshold}.`}
+                            checked={auto.autoBallRestock}
+                            disabled={busyKey === "autoBallRestock"}
+                            onToggle={flip("autoBallRestock")}
+                          >
+                            <NumField label="Repor abaixo de" value={auto.ballThreshold} min={0} onCommit={(n) => void applyAuto("ballThreshold", { ballThreshold: n })} />
+                            <NumField label="Comprar (qtd)" value={auto.ballQty} min={1} onCommit={(n) => void applyAuto("ballQty", { ballQty: n })} />
+                          </ToggleRow>
+                          <ToggleRow
+                            label={`Repor ${reviveName}`}
+                            desc={`Compra ${auto.reviveQty ?? 20} un. quando o estoque ficar abaixo de ${auto.reviveThreshold ?? 5}.`}
+                            checked={Boolean(auto.autoReviveRestock)}
+                            disabled={busyKey === "autoReviveRestock"}
+                            onToggle={flip("autoReviveRestock")}
+                          >
+                            <label className="block min-w-0 space-y-1">
+                              <span className="block truncate text-[11px] font-bold text-mute">Revive (usar e comprar)</span>
+                              <select
+                                className="field w-full text-sm"
+                                value={String(auto.reviveId ?? 205)}
+                                disabled={busyKey === "reviveId"}
+                                onChange={(e) => void applyAuto("reviveId", { reviveId: Number(e.target.value) })}
+                              >
+                                <option value="205">Revive (×{fmtShort(auto.reviveStock?.["205"] ?? 0)})</option>
+                                <option value="206">Max Revive (×{fmtShort(auto.reviveStock?.["206"] ?? 0)})</option>
+                              </select>
+                            </label>
+                            <NumField label="Repor abaixo de" value={auto.reviveThreshold ?? 5} min={0} onCommit={(n) => void applyAuto("reviveThreshold", { reviveThreshold: n })} />
+                            <NumField label="Comprar (qtd)" value={auto.reviveQty ?? 20} min={1} onCommit={(n) => void applyAuto("reviveQty", { reviveQty: n })} />
+                          </ToggleRow>
+                        </div>
+                      </AutoGroup>
 
-                        {/* % da cura automática do jogo */}
-                        <div className="space-y-1.5 rounded-lg border border-line bg-tile p-3">
-                          <div className="flex items-center justify-between gap-2 text-xs">
-                            <span className="font-bold text-fg">Usar poção quando HP ficar abaixo de:</span>
-                            <span className="tnum rounded bg-void px-2 py-0.5 text-sm font-extrabold text-poke-green">
-                              {autoDraft.hpLimiarPct}%
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <input
-                              type="range"
+                      <AutoGroup title="Outros">
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <ToggleRow
+                            label="Captura automática"
+                            desc="Lança Pokébolas nos selvagens derrotados (não precisa de VIP)."
+                            checked={auto.autoCatch}
+                            disabled={busyKey === "autoCatch"}
+                            onToggle={flip("autoCatch")}
+                          />
+                          <ToggleRow
+                            label="Resgatar Passe de Batalha"
+                            desc="Resgata os prêmios diários do Passe assim que virar o dia."
+                            checked={Boolean(auto.autoPassClaim)}
+                            disabled={busyKey === "autoPassClaim"}
+                            onToggle={flip("autoPassClaim")}
+                          />
+                          <ToggleRow
+                            label="PVP Ranqueado automático"
+                            desc="Entra sozinho na fila do PVP ranqueado."
+                            checked={auto.pvpAuto}
+                            disabled={busyKey === "pvpAuto"}
+                            onToggle={flip("pvpAuto")}
+                          />
+                        </div>
+                      </AutoGroup>
+
+                      <details className="group rounded-xl border border-line px-3 py-2.5">
+                        <summary className="cursor-pointer text-xs font-bold uppercase tracking-wide text-mute">Avançado</summary>
+                        <div className="mt-3 space-y-2.5">
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                            <NumField
+                              label={online ? "Cura no jogo abaixo de" : "Cura no jogo (só online)"}
+                              value={auto.hpLimiarPct ?? (auto.hpLimiar != null ? Math.round(auto.hpLimiar * 100) : 40)}
                               min={10}
                               max={95}
-                              step={5}
-                              value={Math.min(95, Math.max(10, Number(autoDraft.hpLimiarPct || 40)))}
-                              onChange={(e) => setAutoDraft({ ...autoDraft, hpLimiarPct: e.target.value })}
-                              className="flex-1 accent-[#f3c04a]"
+                              suffix="%"
+                              disabled={!online}
+                              onCommit={(n) => void applyAuto("hpLimiarPct", { hpLimiarPct: n }, `Cura automática agora em ${n}% de HP.`)}
                             />
-                            <input
-                              type="number"
-                              min={10}
-                              max={95}
-                              value={autoDraft.hpLimiarPct}
-                              onChange={(e) => setAutoDraft({ ...autoDraft, hpLimiarPct: e.target.value.replace(/\D/g, "") })}
-                              className="field w-20 text-center text-sm font-bold"
-                            />
+                            <NumField label="Auto-Centro abaixo de" value={auto.autoCenterHpPct} min={5} max={80} suffix="%" onCommit={(n) => void applyAuto("autoCenterHpPct", { autoCenterHpPct: n })} />
+                            <NumField label="Reserva mínima de gold" value={auto.goldReserve} min={0} onCommit={(n) => void applyAuto("goldReserve", { goldReserve: n })} />
                           </div>
                           <p className="text-[11px] text-mute">
-                            Controla o gatilho oficial de cura do jogo (<code>hpLimiar</code>, de 10% a 95%).
+                            Cura no jogo: 10% a 95% (gatilho oficial <code>hpLimiar</code>). Auto-Centro: 5% a 80%. Reserva de gold: 0 = sem piso; abaixo dela o bot não compra nada.
                           </p>
+                          <ToggleRow
+                            label="Voltar automático à hunt (jogo)"
+                            desc="Opção do servidor: depois de desmaiar e curar no Centro, volta para a hunt. O Pausar desliga e o Retomar religa sozinho, então normalmente não precisa mexer aqui."
+                            checked={Boolean(auto.autoVoltarHunt)}
+                            disabled={busyKey === "autoVoltarHunt" || !online}
+                            onToggle={flip("autoVoltarHunt")}
+                          />
                         </div>
-
-                        {/* Quantidades de Poção, Bola, Piso de Ouro e Auto-Centro */}
-                        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                          <label className="block space-y-1">
-                            <span className="text-[11px] font-bold text-mute">Poção: repor abaixo de</span>
-                            <input
-                              className="field w-full text-sm"
-                              inputMode="numeric"
-                              value={autoDraft.potionThreshold}
-                              onChange={(e) => setAutoDraft({ ...autoDraft, potionThreshold: e.target.value.replace(/\D/g, "") })}
-                            />
-                          </label>
-                          <label className="block space-y-1">
-                            <span className="text-[11px] font-bold text-mute">Poção: comprar qtd</span>
-                            <input
-                              className="field w-full text-sm"
-                              inputMode="numeric"
-                              value={autoDraft.potionQty}
-                              onChange={(e) => setAutoDraft({ ...autoDraft, potionQty: e.target.value.replace(/\D/g, "") })}
-                            />
-                          </label>
-                          <label className="block space-y-1">
-                            <span className="text-[11px] font-bold text-mute">Auto-Centro (% HP)</span>
-                            <input
-                              className="field w-full text-sm"
-                              inputMode="numeric"
-                              value={autoDraft.autoCenterHpPct}
-                              onChange={(e) => setAutoDraft({ ...autoDraft, autoCenterHpPct: e.target.value.replace(/\D/g, "") })}
-                            />
-                          </label>
-                          <label className="block space-y-1">
-                            <span className="text-[11px] font-bold text-mute">Bola: repor abaixo de</span>
-                            <input
-                              className="field w-full text-sm"
-                              inputMode="numeric"
-                              value={autoDraft.ballThreshold}
-                              onChange={(e) => setAutoDraft({ ...autoDraft, ballThreshold: e.target.value.replace(/\D/g, "") })}
-                            />
-                          </label>
-                          <label className="block space-y-1">
-                            <span className="text-[11px] font-bold text-mute">Bola: comprar qtd</span>
-                            <input
-                              className="field w-full text-sm"
-                              inputMode="numeric"
-                              value={autoDraft.ballQty}
-                              onChange={(e) => setAutoDraft({ ...autoDraft, ballQty: e.target.value.replace(/\D/g, "") })}
-                            />
-                          </label>
-                          <label className="block space-y-1">
-                            <span className="text-[11px] font-bold text-mute">Reserva mín. de Gold</span>
-                            <input
-                              className="field w-full text-sm"
-                              inputMode="numeric"
-                              value={autoDraft.goldReserve}
-                              onChange={(e) => setAutoDraft({ ...autoDraft, goldReserve: e.target.value.replace(/\D/g, "") })}
-                            />
-                          </label>
-                          <label className="block space-y-1">
-                            <span className="text-[11px] font-bold text-mute">Revive p/ usar & comprar</span>
-                            <select
-                              className="field w-full text-sm"
-                              value={autoDraft.reviveId}
-                              onChange={(e) => setAutoDraft({ ...autoDraft, reviveId: e.target.value })}
-                            >
-                              <option value="205">Revive (×{fmtShort(auto.reviveStock?.["205"] ?? 0)})</option>
-                              <option value="206">Max Revive (×{fmtShort(auto.reviveStock?.["206"] ?? 0)})</option>
-                            </select>
-                          </label>
-                          <label className="block space-y-1">
-                            <span className="text-[11px] font-bold text-mute">Revive: repor abaixo de</span>
-                            <input
-                              className="field w-full text-sm"
-                              inputMode="numeric"
-                              value={autoDraft.reviveThreshold}
-                              onChange={(e) => setAutoDraft({ ...autoDraft, reviveThreshold: e.target.value.replace(/\D/g, "") })}
-                            />
-                          </label>
-                          <label className="block space-y-1">
-                            <span className="text-[11px] font-bold text-mute">Revive: comprar qtd</span>
-                            <input
-                              className="field w-full text-sm"
-                              inputMode="numeric"
-                              value={autoDraft.reviveQty}
-                              onChange={(e) => setAutoDraft({ ...autoDraft, reviveQty: e.target.value.replace(/\D/g, "") })}
-                            />
-                          </label>
-                        </div>
-
-                        <div className="flex justify-end">
-                          <button
-                            type="button"
-                            disabled={busyKey === "saveNums"}
-                            onClick={async () => {
-                              setBusyKey("saveNums");
-                              setMsg(null);
-                              try {
-                                const patch: AutomationPatch = {
-                                  potionThreshold: Number(autoDraft.potionThreshold || 10),
-                                  potionQty: Math.max(1, Number(autoDraft.potionQty || 100)),
-                                  ballThreshold: Number(autoDraft.ballThreshold || 10),
-                                  ballQty: Math.max(1, Number(autoDraft.ballQty || 100)),
-                                  reviveId: Number(autoDraft.reviveId || 205),
-                                  reviveThreshold: Number(autoDraft.reviveThreshold || 5),
-                                  reviveQty: Math.max(1, Number(autoDraft.reviveQty || 20)),
-                                  goldReserve: Number(autoDraft.goldReserve || 0),
-                                  autoCenterHpPct: Math.min(80, Math.max(5, Number(autoDraft.autoCenterHpPct || 20))),
-                                  ...(acc.status === "online"
-                                    ? { hpLimiarPct: Math.min(95, Math.max(10, Number(autoDraft.hpLimiarPct || 40))) }
-                                    : {}),
-                                };
-                                await actions.setAutomation(accId, patch);
-                                setMsg({
-                                  tone: "ok",
-                                  text:
-                                    acc.status === "online"
-                                      ? "Limiares, % de cura e quantidades aplicados em tempo real!"
-                                      : "Quantidades salvas! (A % de cura no jogo só pode ser enviada quando a conta estiver online.)",
-                                });
-                              } catch (e) {
-                                setMsg({ tone: "error", text: e instanceof Error ? e.message : "Erro ao salvar parâmetros" });
-                              } finally {
-                                setBusyKey(null);
-                              }
-                            }}
-                            className="btn border-0 bg-poke-gold px-4 py-1.5 text-xs font-bold text-void hover:bg-[#f6ca5e]"
-                          >
-                            {busyKey === "saveNums" ? "Aplicando…" : "Salvar parâmetros"}
-                          </button>
-                        </div>
-                      </div>
+                      </details>
                     </>
                   ) : (
                     <p className="text-xs text-mute">Dados de automação indisponíveis.</p>
@@ -1101,45 +1044,7 @@ export function AccountDetailModal({
                 </div>
               )}
 
-              {/* ABA 4: INVENTÁRIO */}
-              {tab === "inventario" && (
-                <div className="space-y-4">
-                  <section className="space-y-2">
-                    <h3 className="text-xs font-bold uppercase tracking-wide text-poke-gold">Pokébolas</h3>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                      {(acc.inventory?.balls ?? []).map((b) => (
-                        <div key={b.id} className="flex items-center gap-2 rounded-lg border border-line bg-tile px-2.5 py-2">
-                          <ItemSprite icon={b.icon} size={26} alt={b.name} />
-                          <div className="min-w-0">
-                            <div className="truncate text-xs font-bold">{b.name}</div>
-                            <div className="tnum text-xs text-mute">×{fmtShort(b.qty)}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-
-                  <section className="space-y-2">
-                    <h3 className="text-xs font-bold uppercase tracking-wide text-mute">
-                      Itens ({acc.inventory?.items.length ?? 0})
-                    </h3>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                      {(acc.inventory?.items ?? []).slice(0, 30).map((it) => (
-                        <div key={it.id} className="flex items-center gap-2 rounded-lg border border-line bg-void/60 px-2.5 py-1.5">
-                          <ItemSprite icon={it.icon} size={24} alt={it.name} />
-                          <div className="min-w-0">
-                            <div className="truncate text-xs font-semibold">{it.name}</div>
-                            <div className="tnum text-[11px] text-mute">×{fmtShort(it.qty)}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                </div>
-              )}
-
-              {/* ABA 5: CAPTURAS DA CONTA */}
-              {tab === "capturas" && <CapturesView fixedAccount={accId} compact />}
+              {tab === "rotinas" && <FeaturesTab accId={accId} />}
             </div>
           </motion.div>
         </motion.div>

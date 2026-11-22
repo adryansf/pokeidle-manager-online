@@ -18,6 +18,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { AnimatedNumber } from "@/components/ui";
 import { actions, type AccountLive, type LiveEvent, type LiveSlot } from "@/lib/actions";
 import { useAccount } from "@/lib/telemetry";
+import { usePauseToggle } from "@/lib/usePauseToggle";
 import { fmtDuration, fmtShort } from "@/lib/utils";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -209,7 +210,8 @@ export function LiveModal({ accId, open, onClose }: { accId: string; open: boole
   const acc = useAccount(accId);
   const [live, setLive] = useState<AccountLive | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pauseBusy, setPauseBusy] = useState(false);
+  const pause = usePauseToggle(accId);
+  const pauseBusy = pause.busy;
   const [centerBusy, setCenterBusy] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const inFlight = useRef(false);
@@ -258,32 +260,17 @@ export function LiveModal({ accId, open, onClose }: { accId: string; open: boole
     }
   };
 
+  // Mesmo Pausar/Retomar do card e dos detalhes (inclui recalcular o Auto-Hunt antes de retomar).
   const togglePause = async () => {
-    setPauseBusy(true);
-    try {
-      const next = !(live?.paused ?? acc?.paused ?? false);
-      await actions.pause(accId, next);
-      await fetchLive();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao alterar pausa");
-    } finally {
-      setPauseBusy(false);
-    }
+    if (await pause.setPaused(!(live?.paused ?? acc?.paused ?? false))) await fetchLive();
   };
 
   const pauseAndOpenGame = async () => {
-    setPauseBusy(true);
-    try {
-      if (!(live?.paused ?? acc?.paused)) {
-        await actions.pause(accId, true);
-        await fetchLive();
-      }
-      window.open("https://pokeidle.io/app", "_blank", "noopener,noreferrer");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao pausar antes de abrir o jogo");
-    } finally {
-      setPauseBusy(false);
+    if (!(live?.paused ?? acc?.paused)) {
+      if (!(await pause.setPaused(true))) return;
+      await fetchLive();
     }
+    window.open("https://pokeidle.io/app", "_blank", "noopener,noreferrer");
   };
 
   if (typeof document === "undefined") return null;
@@ -389,7 +376,7 @@ export function LiveModal({ accId, open, onClose }: { accId: string; open: boole
                   }`}
                 >
                   {isPaused ? <Play className="size-3.5" aria-hidden /> : <Pause className="size-3.5" aria-hidden />}
-                  {pauseBusy ? "Aguarde…" : isPaused ? "Retomar bot" : "Pausar bot"}
+                  {pauseBusy ? "Aguarde…" : isPaused ? "Retomar" : "Pausar"}
                 </button>
                 <button
                   type="button"
@@ -415,9 +402,9 @@ export function LiveModal({ accId, open, onClose }: { accId: string; open: boole
 
             {/* Corpo rolável */}
             <div className="flex-1 space-y-4 overflow-y-auto p-3.5 sm:p-5">
-              {error && (
+              {(error || pause.error) && (
                 <div className="rounded-lg border border-[#7a2f27] bg-[#32140f] px-3 py-2 text-xs font-semibold text-poke-red">
-                  {error}
+                  {pause.error ?? error}
                 </div>
               )}
 
@@ -430,14 +417,6 @@ export function LiveModal({ accId, open, onClose }: { accId: string; open: boole
                       <b>pokeidle.io/app</b> no navegador sem tomar <b>4001 (login externo)</b>.
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void togglePause()}
-                    disabled={pauseBusy}
-                    className="btn border-[#2f6b3a] bg-[#16301c] px-2.5 py-1 text-xs font-bold text-poke-green"
-                  >
-                    Retomar agora
-                  </button>
                 </div>
               )}
 

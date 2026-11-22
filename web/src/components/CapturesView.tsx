@@ -20,7 +20,8 @@ function fmtTime(ts: number) {
 const prettySlug = (s?: string | null) =>
   s ? s.replace(/[_-]+/g, " ").replace(/(^|\s)[a-z]/g, (c) => c.toUpperCase()) : "";
 
-export function CapturesView({ fixedAccount, compact = false }: { fixedAccount?: string; compact?: boolean }) {
+/** `account` vem do filtro de conta do cabeçalho (aba Capturas); `fixedAccount` trava numa conta só. */
+export function CapturesView({ fixedAccount, account: headerAccount, compact = false }: { fixedAccount?: string; account?: string; compact?: boolean }) {
   const ids = useAccountIds();
   const accounts = useAccountsMap();
   const [account, setAccount] = useState(fixedAccount ?? "all");
@@ -31,7 +32,7 @@ export function CapturesView({ fixedAccount, compact = false }: { fixedAccount?:
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const effectiveAccount = fixedAccount ?? account;
+  const effectiveAccount = fixedAccount ?? headerAccount ?? account;
 
   const load = useCallback(async () => {
     try {
@@ -118,7 +119,7 @@ export function CapturesView({ fixedAccount, compact = false }: { fixedAccount?:
       {/* Filtros */}
       <div className={`${compact ? "" : "card p-3 sm:p-4"} space-y-3`}>
         <div className="flex flex-wrap items-center gap-2">
-          {!fixedAccount && (
+          {!fixedAccount && headerAccount === undefined && (
             <select
               className="field text-sm"
               value={account}

@@ -1,8 +1,10 @@
 import { Crosshair, HeartPulse, Layers, Pause, Play, Sparkles } from "lucide-react";
 import { useState } from "react";
+import { ConsolidateCoinsPanel } from "@/components/FeaturesTab";
 import { Modal, Notice } from "@/components/SettingsView";
 import { actions, useHuntCatalog } from "@/lib/actions";
 import { useAccountIds, useAccountsMap } from "@/lib/telemetry";
+import { syncBestHuntBeforeResume } from "@/lib/usePauseToggle";
 
 const POTIONS = [
   { id: 70070, name: "Golden Potion" },
@@ -85,6 +87,8 @@ export function BulkActionsModal({ onClose }: { onClose: () => void }) {
             disabled={busy || ids.length === 0}
             onClick={() =>
               void run(async () => {
+                // Igual ao Retomar de uma conta: recalcula a #1 do Mapa das contas em Auto-Hunt antes de voltar.
+                await Promise.all(ids.map((id) => syncBestHuntBeforeResume(id, accounts[id]?.automation)));
                 const r = await actions.bulkPause(false);
                 return { tone: "ok", text: `${r.count} conta(s) retomada(s).` };
               })
@@ -222,6 +226,7 @@ export function BulkActionsModal({ onClose }: { onClose: () => void }) {
                   if (r.sent.length) parts.push(`trocadas agora: ${r.sent.join(", ")}`);
                   if (r.queued.length) parts.push(`na fila pós-combate: ${r.queued.join(", ")}`);
                   if (r.skipped.length) parts.push(`puladas: ${r.skipped.join(", ")}`);
+                  if (r.autoHuntOff?.length) parts.push(`Auto-Hunt desligado (hunt fixada): ${r.autoHuntOff.join(", ")}`);
                   return {
                     tone: r.sent.length + r.queued.length > 0 ? "ok" : "warn",
                     text: parts.length ? parts.join(" · ") : "Nenhuma conta elegível.",
@@ -235,6 +240,7 @@ export function BulkActionsModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
       )}
+      <ConsolidateCoinsPanel />
     </Modal>
   );
 }

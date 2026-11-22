@@ -6,7 +6,7 @@ import { HuntRow, TypeChip } from "@/components/HuntRow";
 import { PokemonSprite } from "@/components/Sprites";
 import { Reveal } from "@/components/ui";
 import { actions, useCreatures, useHuntCatalog, type Creature, type Hunt, type OutlandTier } from "@/lib/actions";
-import { type HuntOrder, type HuntSimOptions, rankLines, useBestHunts } from "@/lib/huntAdvisor";
+import { computeBestHuntSlug, type HuntOrder, type HuntSimOptions, rankLines, useBestHunts } from "@/lib/huntAdvisor";
 import { inRegion, REGIONS, regionOfHunt } from "@/lib/regions";
 import { useAccountIds, useAccountsMap } from "@/lib/telemetry";
 import { effectiveness, matchup, TYPE_COLOR, TYPES } from "@/lib/typeChart";
@@ -164,7 +164,8 @@ export function MapaView() {
   const [query, setQuery] = useState("");
   const [types, setTypes] = useState<string[]>([]);
   const [mode, setMode] = useState<Mode>("own");
-  const [onlyOpen, setOnlyOpen] = useState(false);
+  // Filtro único de "só liberadas": vale para a Melhor hunt e para a lista de áreas.
+  const [onlyOpen, setOnlyOpen] = useState(true);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [focus, setFocus] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>(null);
@@ -183,20 +184,23 @@ export function MapaView() {
   const best = useBestHunts(selected || null, `${acc?.pokemon?.name}|${acc?.pokemon?.level}|${acc?.level}`, online, simOptions);
   const rankBySlug = useMemo(() => new Map(rankLines(best.data?.lines, order).slice(0, 3).map((l, i) => [l.slug, i + 1] as const)), [best.data, order]);
 
-  // Região inicial: a da hunt atual da conta (ou Kanto). As dez regiões do jogo ficam sempre à vista.
+  // Região inicial: a da hunt atual da conta (ou Kanto). As dez regiões do jogo ficam sempre à vista, mais "Todas".
+  // É o único filtro de região da tela: vale para a Melhor hunt (e o "Usar no Auto-Hunt") e para a lista de áreas.
   const currentArea = regionOfHunt(cat?.hunts.find((h) => h.slug === currentSlug))?.id;
   useEffect(() => {
     if (!area && cat?.hunts.length) setArea(currentArea ?? REGIONS[0].id);
   }, [area, currentArea, cat]);
+  const allRegions = area === "all";
   const region = REGIONS.find((r) => r.id === area) ?? REGIONS[0];
+  const regionLabel = allRegions ? "todas as regiões" : region.label;
 
   const q = query.trim().toLowerCase();
   const list = useMemo(
     () =>
       (cat?.hunts ?? [])
-        .filter((h) => inRegion(h, region) && (!onlyOpen || h.nivel <= level) && matches(h, creatures, q, types, mode))
+        .filter((h) => (allRegions || inRegion(h, region)) && (!onlyOpen || h.nivel <= level) && matches(h, creatures, q, types, mode))
         .sort((a, b) => a.nivel - b.nivel || a.nome.localeCompare(b.nome)),
-    [cat, region, onlyOpen, level, creatures, q, types, mode],
+    [cat, allRegions, region, onlyOpen, level, creatures, q, types, mode],
   );
   const focused = useMemo(() => cat?.hunts.find((h) => h.slug === (focus ?? currentSlug)) ?? null, [cat, focus, currentSlug]);
 
@@ -212,7 +216,11 @@ export function MapaView() {
         }
         setStatus(
           r.confirmed
-            ? { slug: h.slug, state: "ok", text: `${acc?.nick ?? "A conta"} agora caça em ${h.nome}.` }
+            ? {
+                slug: h.slug,
+                state: "ok",
+                text: `${acc?.nick ?? "A conta"} agora caça em ${h.nome}.${r.autoHuntOff ? " Hunt fixada: o Auto-Hunt foi desligado para não desfazer a troca." : ""}`,
+              }
             : { slug: h.slug, state: "ignored", text: "O jogo não aceitou a troca. A conta pode estar em combate (espere alguns segundos) ou sem o nível da área." },
         );
       } catch (e) {
@@ -281,6 +289,25 @@ export function MapaView() {
     }
   }, [selected]);
 
+  const auto = acc?.automation;
+  const autoRegion = allRegions ? "all" : area;
+  const autoInUse = Boolean(auto?.autoBestHunt && (auto.autoBestHuntPriority || "xp") === order && (auto.autoBestHuntRegion || "all") === autoRegion);
+  const useAuto = useCallback(
+    async (o: HuntOrder, reg: string) => {
+      if (!selected) throw new Error("Escolha uma conta.");
+      const r = reg || "all";
+      const sim = await computeBestHuntSlug(selected, o, r).catch(() => null);
+      await actions.setAutomation(selected, {
+        autoBestHunt: true,
+        autoBestHuntPriority: o,
+        autoBestHuntRegion: r,
+        ...(sim?.slug ? { autoBestHuntSlug: sim.slug } : {}),
+      });
+      return `${acc?.nick ?? "A conta"} agora está em hunt Automática${sim?.nome ? `: vai para ${sim.nome}` : ""}.`;
+    },
+    [selected, acc?.nick],
+  );
+
   const toggleType = (t: string) => setTypes((s) => (s.includes(t) ? s.filter((x) => x !== t) : [...s, t]));
 
   if (!ids.length) return <p className="card p-10 text-center text-mute">Aguardando dados da VPS…</p>;
@@ -337,6 +364,40 @@ export function MapaView() {
         </p>
       )}
 
+      {/* Regiões: filtro único da tela (Melhor hunt, Auto-Hunt e lista de áreas) */}
+      <Reveal index={1}>
+        <div className="-mx-0.5 flex gap-1.5 overflow-x-auto px-0.5 pb-1" role="tablist" aria-label="Região">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={allRegions}
+            className="btn shrink-0 flex-col !gap-0 !py-1.5"
+            data-active={allRegions}
+            onClick={() => setArea("all")}
+          >
+            <span>Todas</span>
+            <span className="text-[10px] font-semibold opacity-70">regiões</span>
+          </button>
+          {REGIONS.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              role="tab"
+              aria-selected={area === r.id}
+              className="btn shrink-0 flex-col !gap-0 !py-1.5"
+              data-active={area === r.id}
+              onClick={() => setArea(r.id)}
+            >
+              <span className="flex items-center gap-1">
+                {r.nivel > level && <Lock className="size-3 opacity-70" aria-hidden />}
+                {r.label}
+              </span>
+              <span className="tnum text-[10px] font-semibold opacity-70">Nv {fmtInt(r.nivel)}</span>
+            </button>
+          ))}
+        </div>
+      </Reveal>
+
       <Reveal index={1}>
         <BestHuntCard
           nick={acc?.nick ?? ""}
@@ -359,33 +420,15 @@ export function MapaView() {
           canHunt={online}
           onFocus={setFocus}
           onHunt={hunt}
+          region={allRegions ? "" : area}
+          regionLabel={regionLabel}
+          onlyOpen={onlyOpen}
+          autoInUse={autoInUse}
+          onUseAuto={useAuto}
         />
       </Reveal>
 
-      {/* Regiões */}
-      <Reveal index={1}>
-        <div className="-mx-0.5 flex gap-1.5 overflow-x-auto px-0.5 pb-1" role="tablist" aria-label="Região">
-          {REGIONS.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              role="tab"
-              aria-selected={area === r.id}
-              className="btn shrink-0 flex-col !gap-0 !py-1.5"
-              data-active={area === r.id}
-              onClick={() => setArea(r.id)}
-            >
-              <span className="flex items-center gap-1">
-                {r.nivel > level && <Lock className="size-3 opacity-70" aria-hidden />}
-                {r.label}
-              </span>
-              <span className="tnum text-[10px] font-semibold opacity-70">Nv {fmtInt(r.nivel)}</span>
-            </button>
-          ))}
-        </div>
-      </Reveal>
-
-      {region.id === "outland" && cat?.outland && (
+      {!allRegions && region.id === "outland" && cat?.outland && (
         <Reveal index={1}>
           <OutlandTiers
             tiers={cat.outland.tiers}
@@ -416,12 +459,12 @@ export function MapaView() {
               Tipo{types.length ? `: ${types.length}` : ""}
               <ChevronDown className={`size-4 transition-transform duration-200 ${filtersOpen ? "rotate-180" : ""}`} aria-hidden />
             </button>
-            <button type="button" className="btn" data-active={onlyOpen} aria-pressed={onlyOpen} onClick={() => setOnlyOpen((v) => !v)} title="Só as áreas que o nível da conta já alcança">
-              Liberadas
+            <button type="button" className="btn" data-active={onlyOpen} aria-pressed={onlyOpen} onClick={() => setOnlyOpen((v) => !v)} title="Só as áreas que o nível da conta já alcança (vale também para a Melhor hunt)">
+              Só liberadas
             </button>
             </div>
             <span className="text-xs text-mute sm:ml-auto" aria-live="polite">
-              {fmtInt(list.length)} áreas em {region.label}
+              {fmtInt(list.length)} áreas em {regionLabel}
             </span>
           </div>
           <AnimatePresence initial={false}>
@@ -520,7 +563,7 @@ export function MapaView() {
             <ul key={area} className="min-w-0 space-y-1.5 lg:max-h-[calc(100vh-22rem)] lg:overflow-y-auto lg:pr-1">
               {list.length === 0 && (
                 <li className="card p-8 text-center text-sm text-mute">
-                  {query || types.length || onlyOpen ? "Nenhuma área com esses filtros." : `${region.label} ainda não tem áreas no jogo.`}
+                  {query || types.length || onlyOpen ? "Nenhuma área com esses filtros." : `${regionLabel} ainda não tem áreas no jogo.`}
                 </li>
               )}
               {list.map((h, i) => {

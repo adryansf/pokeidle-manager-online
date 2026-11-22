@@ -3,7 +3,7 @@ import { LanguageSection } from "@/components/LanguageSection";
 import { ProxyCenterSection, ProxyPicker } from "@/components/ProxyCenter";
 import { AnimatePresence, motion } from "framer-motion";
 import { useScrollLock } from "@/lib/scrollLock";
-import { Check, Copy, Pencil, Plus, Power, RefreshCw, Trash2, TriangleAlert, X } from "lucide-react";
+import { Bell, Check, Copy, Pencil, Plus, Power, RefreshCw, Trash2, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StatusPill } from "@/components/StatusPill";
 import { UpdateSection } from "@/components/UpdateCard";
@@ -512,24 +512,10 @@ function AddAccountDialog({ onClose, onDone }: { onClose: () => void; onDone: ()
 
 // ------------------------------------------------------------------ editar conta
 function EditAccountDialog({ acc, onClose, onDone }: { acc: AdminAccount; onClose: () => void; onDone: () => void }) {
-  const o = acc.options;
   const [proxy, setProxy] = useState<ProxyForm>(
     acc.proxy ? { scheme: acc.proxy.scheme, host: acc.proxy.host, port: String(acc.proxy.port), username: acc.proxy.username, password: "" } : EMPTY_PROXY,
   );
   const [selectedProxyId, setSelectedProxyId] = useState<number | null>(null);
-  const [opts, setOpts] = useState({
-    auto_catch: o.auto_catch,
-    auto_potion: o.auto_potion,
-    potion_restock_threshold: String(o.potion_restock_threshold),
-    potion_restock_qty: String(o.potion_restock_qty),
-    auto_ball_restock: o.auto_ball_restock,
-    ball_restock_threshold: String(o.ball_restock_threshold),
-    ball_restock_qty: String(o.ball_restock_qty),
-    gold_reserve: String(o.gold_reserve ?? 0),
-    auto_potion_fallback: o.auto_potion_fallback ?? true,
-    auto_center: o.auto_center ?? true,
-    auto_center_hp_pct: String(o.auto_center_hp_pct ?? 20),
-  });
   const [paste, setPaste] = useState("");
   const [guide, setGuide] = useState<"bookmarklet" | "console">("bookmarklet");
   const [busy, setBusy] = useState(false);
@@ -541,19 +527,6 @@ function EditAccountDialog({ acc, onClose, onDone }: { acc: AdminAccount; onClos
     try {
       const body: Record<string, unknown> = {
         ...(selectedProxyId !== null ? { proxy_id: selectedProxyId } : { proxy: proxyInput(proxy, true) }),
-        options: {
-          auto_catch: opts.auto_catch,
-          auto_potion: opts.auto_potion,
-          potion_restock_threshold: Number(opts.potion_restock_threshold),
-          potion_restock_qty: Number(opts.potion_restock_qty),
-          auto_ball_restock: opts.auto_ball_restock,
-          ball_restock_threshold: Number(opts.ball_restock_threshold),
-          ball_restock_qty: Number(opts.ball_restock_qty),
-          gold_reserve: Number(opts.gold_reserve || 0),
-          auto_potion_fallback: opts.auto_potion_fallback,
-          auto_center: opts.auto_center,
-          auto_center_hp_pct: Math.min(80, Math.max(5, Number(opts.auto_center_hp_pct || 20))),
-        },
       };
       if (selectedProxyId === null && proxy.host.trim() && !Number(proxy.port)) throw new Error("Informe a porta do proxy.");
       if (paste.trim()) {
@@ -571,10 +544,6 @@ function EditAccountDialog({ acc, onClose, onDone }: { acc: AdminAccount; onClos
       setBusy(false);
     }
   };
-
-  const num = (k: keyof typeof opts) => (
-    <input className="field w-full" inputMode="numeric" value={opts[k] as string} onChange={(e) => setOpts({ ...opts, [k]: e.target.value.replace(/\D/g, "") })} />
-  );
 
   return (
     <Modal title={`Editar ${acc.nick}`} onClose={onClose} wide>
@@ -596,51 +565,9 @@ function EditAccountDialog({ acc, onClose, onDone }: { acc: AdminAccount; onClos
           </>
         )}
       </div>
-      <div className="space-y-2.5">
-        <h3 className="text-sm font-bold uppercase tracking-wide text-mute">Automação</h3>
-        <Check2 checked={opts.auto_catch} onChange={(v) => setOpts({ ...opts, auto_catch: v })}>
-          Captura automática de Pokémon
-        </Check2>
-        <Check2 checked={opts.auto_potion} onChange={(v) => setOpts({ ...opts, auto_potion: v })}>
-          Repor Potions automaticamente
-        </Check2>
-        {opts.auto_potion && (
-          <div className="grid grid-cols-2 gap-2">
-            <Labeled label="Repor abaixo de">{num("potion_restock_threshold")}</Labeled>
-            <Labeled label="Quantidade a comprar">{num("potion_restock_qty")}</Labeled>
-          </div>
-        )}
-        <Check2 checked={opts.auto_ball_restock} onChange={(v) => setOpts({ ...opts, auto_ball_restock: v })}>
-          Repor Balls automaticamente
-        </Check2>
-        {opts.auto_ball_restock && (
-          <div className="grid grid-cols-2 gap-2">
-            <Labeled label="Repor abaixo de">{num("ball_restock_threshold")}</Labeled>
-            <Labeled label="Quantidade a comprar">{num("ball_restock_qty")}</Labeled>
-          </div>
-        )}
-        {(opts.auto_potion || opts.auto_ball_restock) && (
-          <Labeled label="Reserva mínima de Gold (piso de segurança)" hint="0 = sem limite. O bot não compra poções/bolas se o saldo estiver abaixo deste valor.">
-            {num("gold_reserve")}
-          </Labeled>
-        )}
-        <div className="space-y-2 border-t border-line pt-2.5">
-          <h4 className="text-xs font-bold uppercase tracking-wide text-mute">Proteções</h4>
-          <Check2 checked={opts.auto_potion_fallback} onChange={(v) => setOpts({ ...opts, auto_potion_fallback: v })}>
-            Trocar automaticamente para a próxima poção disponível se a equipada zerar
-          </Check2>
-          <Check2 checked={opts.auto_center} onChange={(v) => setOpts({ ...opts, auto_center: v })}>
-            Auto-Centro Pokémon de emergência (ir curar se ficar sem poções e HP baixar)
-          </Check2>
-          {opts.auto_center && (
-            <div className="max-w-[220px]">
-              <Labeled label="Ir ao Centro abaixo de (% HP)" hint="Entre 5% e 80% (padrão: 20%).">
-                {num("auto_center_hp_pct")}
-              </Labeled>
-            </div>
-          )}
-        </div>
-      </div>
+      <p className="rounded-lg border border-line bg-black/20 px-3 py-2 text-xs text-mute">
+        As automações (captura, cura, reposição na loja, Auto-Centro, modo de hunt…) ficam no <b className="text-fg">card da conta → Detalhes → Automação</b> e valem na hora, sem reiniciar.
+      </p>
       <details className="rounded-lg border border-line px-3 py-2.5" open={!!acc.blocked || acc.tokenStatus === "invalid"}>
         <summary className="cursor-pointer text-sm font-bold uppercase tracking-wide text-mute">Reimportar token</summary>
         <div className="mt-3 space-y-3">
@@ -905,8 +832,16 @@ function NotificationCenterPanel({ onChanged }: { onChanged?: () => void }) {
   );
 }
 
-export function NotificationsModal({ onClose, onChanged }: { onClose: () => void; onChanged?: () => void }) {
-  const [tab, setTab] = useState<"alerts" | "channels">("alerts");
+export function NotificationsModal({
+  onClose,
+  onChanged,
+  initialTab = "alerts",
+}: {
+  onClose: () => void;
+  onChanged?: () => void;
+  initialTab?: "alerts" | "channels";
+}) {
+  const [tab, setTab] = useState<"alerts" | "channels">(initialTab);
   return (
     <Modal title="Central de Notificações" onClose={onClose} wide>
       <div className="flex gap-1.5 border-b border-line pb-2.5" role="tablist">
@@ -931,12 +866,18 @@ export function NotificationsModal({ onClose, onChanged }: { onClose: () => void
           Canais (Discord / Telegram)
         </button>
       </div>
-      {tab === "alerts" ? <NotificationCenterPanel onChanged={onChanged} /> : <GlobalForm onlyNotifications />}
+      {tab === "alerts" ? <NotificationCenterPanel onChanged={onChanged} /> : <GlobalForm mode="channels" />}
     </Modal>
   );
 }
 
-function GlobalForm({ onlyNotifications = false }: { onlyNotifications?: boolean }) {
+/**
+ * Configurações globais, em dois lugares sem repetir nada:
+ * "channels" (Central de Notificações → Canais): Discord, Telegram, avisos do Mercado e relatório diário;
+ * "general" (Configurações → Geral): conexão e avançado, com atalho para os canais.
+ */
+function GlobalForm({ mode, onOpenChannels }: { mode: "channels" | "general"; onOpenChannels?: () => void }) {
+  const channels = mode === "channels";
   const [s, setS] = useState<GlobalSettings | null>(null);
   const [form, setForm] = useState({ ws_url: "", report_hour: 0, report_tz: "", public_url: "" });
   const [wait, setWait] = useState("5"); // minutos de espera após login em outro lugar (texto: dá para apagar e digitar)
@@ -983,6 +924,23 @@ function GlobalForm({ onlyNotifications = false }: { onlyNotifications?: boolean
 
   return (
     <div className="space-y-5">
+      {!channels && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-black/20 px-3.5 py-2.5">
+          <div className="min-w-0 text-sm">
+            <div className="font-bold text-fg">Notificações (Discord / Telegram)</div>
+            <div className="text-xs text-mute">
+              Canais, avisos do Mercado e relatório diário ficam na Central de Notificações.{" "}
+              <Chip on={notifierActive} label={notifierActive ? "Ativo" : "Desligado"} />
+            </div>
+          </div>
+          <button type="button" className="btn text-sm font-bold" onClick={onOpenChannels}>
+            <Bell className="size-4 text-poke-gold" aria-hidden />
+            Abrir canais
+          </button>
+        </div>
+      )}
+      {channels && (
+      <>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-xl border border-line bg-black/20 p-3.5 space-y-3">
           <div className="flex items-center justify-between gap-2">
@@ -1143,7 +1101,10 @@ function GlobalForm({ onlyNotifications = false }: { onlyNotifications?: boolean
       <p className="text-xs text-mute">
         Você pode usar o Discord, o Telegram ou os dois ao mesmo tempo. Tudo fica salvo direto no banco do painel.
       </p>
+      </>
+      )}
 
+      {channels && (
       <Group
         title="Avisos do Mercado"
         badge={
@@ -1180,8 +1141,9 @@ function GlobalForm({ onlyNotifications = false }: { onlyNotifications?: boolean
           <p className="text-xs text-mute">O preço alto é comparado com a média de 7 dias do Mercado. Cada item só é avisado de novo depois de 6 horas, ou se o preço subir ainda mais.</p>
         </div>
       </Group>
+      )}
 
-      {!onlyNotifications && (
+      {!channels && (
         <Group title="Conexão">
           <Labeled label="Reconectar depois de abrir a conta em outro lugar" hint="Quando você entra numa conta pelo jogo ou outro aparelho, o bot espera esse tempo antes de tentar de novo, para não derrubar você. De 1 a 1440 minutos.">
             <div className="flex items-center gap-2">
@@ -1210,6 +1172,7 @@ function GlobalForm({ onlyNotifications = false }: { onlyNotifications?: boolean
         </Group>
       )}
 
+      {channels && (
       <Group title="Relatório diário">
         <label className="flex items-center justify-between gap-3 text-sm">
           O dia vira às
@@ -1222,8 +1185,9 @@ function GlobalForm({ onlyNotifications = false }: { onlyNotifications?: boolean
           </select>
         </label>
       </Group>
+      )}
 
-      {!onlyNotifications && (
+      {!channels && (
         <details className="group rounded-lg border border-line px-3 py-2.5">
           <summary className="cursor-pointer text-sm font-semibold text-mute">Avançado</summary>
           <div className="mt-3 space-y-3">
@@ -1368,6 +1332,7 @@ export function SettingsView() {
   const [data, setData] = useState<{ max: number | null; accounts: AdminAccount[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [channelsOpen, setChannelsOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -1436,7 +1401,7 @@ export function SettingsView() {
       <Reveal as="section" index={4} className="space-y-3">
         <h2 className="text-lg font-extrabold uppercase tracking-wide">Geral</h2>
         <div className="tile p-3 sm:p-4">
-          <GlobalForm />
+          <GlobalForm mode="general" onOpenChannels={() => setChannelsOpen(true)} />
         </div>
       </Reveal>
 
@@ -1460,6 +1425,7 @@ export function SettingsView() {
       </Reveal>
 
       <AnimatePresence>{adding && <AddAccountDialog onClose={() => setAdding(false)} onDone={load} />}</AnimatePresence>
+      <AnimatePresence>{channelsOpen && <NotificationsModal initialTab="channels" onClose={() => setChannelsOpen(false)} />}</AnimatePresence>
     </div>
   );
 }

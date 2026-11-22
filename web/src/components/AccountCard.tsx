@@ -1,18 +1,19 @@
 import { AnimatePresence, motion, useDragControls, type PanInfo } from "framer-motion";
-import { ChevronDown, Clock, Crosshair, Crown, Globe, Heart, Info, MapPin, Pause, Play, Radio, Star, Swords } from "lucide-react";
+import { Bot, ChevronDown, Clock, Crosshair, Crown, FlaskConical, Globe, Heart, HeartPulse, Info, MapPin, Pause, Play, Radio, ShoppingCart, Star, Swords, Target } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { AccountDetailModal } from "@/components/AccountDetailModal";
+import { AccountDetailModal, type DetailTab } from "@/components/AccountDetailModal";
 import { ItemSprite, PokemonSprite, ShinyMark } from "@/components/Sprites";
 import { EquipPopover } from "@/components/EquipPopover";
 import { LiveModal } from "@/components/LiveModal";
 import { StatusPill } from "@/components/StatusPill";
 import { XpMedallion, XpRace, XpSpark, XpVersus } from "@/components/XpMeters";
 import { AnimatedNumber, Coin, GoldPerHourIcon } from "@/components/ui";
-import { actions, type AutomationPatch } from "@/lib/actions";
-import { computeBestHuntSlug, type HuntOrder } from "@/lib/huntAdvisor";
+import { actions } from "@/lib/actions";
+import { automationCount, huntModeLabel, huntModeOf, prettySlug } from "@/lib/automation";
 import { accountNumber, useSheet } from "@/lib/sheet";
 import { serverNow, useAccount } from "@/lib/telemetry";
-import type { EquippedItem } from "@/lib/types";
+import type { AccountAutomation, EquippedItem } from "@/lib/types";
+import { usePauseToggle } from "@/lib/usePauseToggle";
 import { type CardStyle, useCardStyle } from "@/lib/cardStyle";
 import { dragState, justDragged } from "@/lib/useCardOrder";
 import { fmtDuration, fmtShort } from "@/lib/utils";
@@ -47,9 +48,6 @@ const SESSION_ITEMS = [
   { key: "shinyStone", label: "Fragmento de Shiny Stone", icon: "/img/itens/shiny-stone.png" },
   { key: "bike", label: "Fragmento de Bicicleta", icon: "/img/itens/fragmento-bicicleta.png" },
 ] as const;
-
-const prettySlug = (s?: string | null) =>
-  s ? s.replace(/[_-]+/g, " ").replace(/(^|\s)[a-z]/g, (c) => c.toUpperCase()) : "—";
 
 /**
  * Bloco ícone + valor. Celular: uma linha compacta (ícone e valor, sem rótulo).
@@ -310,20 +308,14 @@ function ResumoBody({ id, variant }: { id: string; variant: CardStyle }) {
       </Stat>
     </div>
   );
-  const chips = (
-    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-      <EquipChip item={potion} label="Poção equipada" onPress={options ? open("potion") : undefined} />
-      <EquipChip item={ball} label="Bola equipada" onPress={options ? open("ball") : undefined} />
-      <EquipChip item={revive} label="Revive equipado" onPress={options?.revive ? open("revive") : undefined} />
-    </div>
-  );
-  const chipsBlock = (
+  const equipChips = (block: boolean) => (
     <>
-      <EquipChip item={potion} label="Poção equipada" onPress={options ? open("potion") : undefined} block />
-      <EquipChip item={ball} label="Bola equipada" onPress={options ? open("ball") : undefined} block />
-      <EquipChip item={revive} label="Revive equipado" onPress={options?.revive ? open("revive") : undefined} block />
+      <EquipChip item={potion} label="Poção equipada" onPress={options ? open("potion") : undefined} block={block} />
+      <EquipChip item={ball} label="Bola equipada" onPress={options ? open("ball") : undefined} block={block} />
+      <EquipChip item={revive} label="Revive equipado" onPress={options?.revive ? open("revive") : undefined} block={block} />
     </>
   );
+  const chips = <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">{equipChips(false)}</div>;
   const huntKills =
     acc.hunt && acc.hunt.kills > 0 ? (
       <span className="tnum text-xs font-medium text-mute">
@@ -429,7 +421,7 @@ function ResumoBody({ id, variant }: { id: string; variant: CardStyle }) {
                 <div className="mt-1 text-2xl font-extrabold leading-none sm:text-3xl">{xpHour}</div>
               </div>
               <div className="w-full max-w-[200px]"><XpSpark id={id} /></div>
-              <div className="flex w-full max-w-[200px] flex-col gap-1.5">{chipsBlock}</div>
+              <div className="flex w-full max-w-[200px] flex-col gap-1.5">{equipChips(true)}</div>
             </div>
           </XpVersus>
         </div>
@@ -500,6 +492,40 @@ function SessaoBody({ id }: { id: string }) {
   );
 }
 
+/** Resumo das automações no card ("8/11" + ícones das críticas); o ajuste fica só na aba Automação do modal. */
+function AutomationSummary({ auto, onOpen }: { auto: AccountAutomation; onOpen: () => void }) {
+  const { on, total } = automationCount(auto);
+  const restock = [auto.autoPotion, auto.autoBallRestock, Boolean(auto.autoReviveRestock)];
+  const restockOn = restock.filter(Boolean).length;
+  const icons: { key: string; on: boolean; partial?: boolean; Icon: typeof Bot; tip: string }[] = [
+    { key: "cura", on: auto.gameAutoPotion, Icon: FlaskConical, tip: `Cura automática ${auto.gameAutoPotion ? `ligada (≤ ${auto.hpLimiarPct ?? 40}% HP)` : "desligada"}` },
+    { key: "centro", on: auto.autoCenter, Icon: HeartPulse, tip: `Auto-Centro ${auto.autoCenter ? `ligado (≤ ${auto.autoCenterHpPct}% HP)` : "desligado"}` },
+    { key: "loja", on: restockOn > 0, partial: restockOn > 0 && restockOn < 3, Icon: ShoppingCart, tip: `Reposição na loja: ${restockOn}/3 (poção, bola, revive)` },
+    { key: "captura", on: auto.autoCatch, Icon: Target, tip: `Captura automática ${auto.autoCatch ? "ligada" : "desligada"}` },
+  ];
+  return (
+    <button
+      type="button"
+      title={`${on} de ${total} automações ligadas. ${icons.map((i) => i.tip).join(" · ")}. Clique para ajustar`}
+      aria-label={`Automações: ${on} de ${total} ligadas. Abrir ajustes`}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpen();
+      }}
+      className="inline-flex items-center gap-1.5 rounded-md border border-line bg-void/60 px-1.5 py-0.5 text-[10px] font-bold text-mute transition-colors hover:border-edge hover:text-fg sm:text-[11px]"
+    >
+      <Bot className="size-3.5 text-poke-gold" aria-hidden />
+      <span className="tnum">
+        {on}/{total}
+      </span>
+      {icons.map(({ key, on: isOn, partial, Icon }) => (
+        <Icon key={key} className={`size-3.5 ${isOn ? (partial ? "text-poke-gold" : "text-poke-green") : "text-mute/50"}`} aria-hidden />
+      ))}
+    </button>
+  );
+}
+
 /** Arrastar para trocar de lugar: `canDrag` só no computador; `onDragOver` recebe o ponto do ponteiro. */
 export interface CardDrag {
   canDrag: boolean;
@@ -518,8 +544,13 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
   const [lifted, setLifted] = useState(false);
   const [liveOpen, setLiveOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [pauseBusy, setPauseBusy] = useState(false);
+  const [detailTab, setDetailTab] = useState<DetailTab>("geral");
+  const pause = usePauseToggle(id);
   const [autoBusy, setAutoBusy] = useState<string | null>(null);
+  const openDetail = (t: DetailTab = "geral") => {
+    setDetailTab(t);
+    setDetailOpen(true);
+  };
   const closeLive = useCallback(() => setLiveOpen(false), []);
   const closeDetail = useCallback(() => setDetailOpen(false), []);
   const openLiveFromDetail = useCallback(() => setLiveOpen(true), []);
@@ -631,7 +662,7 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
       onClick={(e) => {
         if (justDragged()) return;
         if ((e.target as HTMLElement).closest("button,a,input,select,textarea,[role='button']")) return;
-        setDetailOpen(true);
+        openDetail();
       }}
       onContextMenu={touchMode ? (e) => e.preventDefault() : undefined}
       className={`card p-2.5 sm:p-3 ${drag?.canDrag ? "cursor-grab active:cursor-grabbing" : touchMode ? "select-none [-webkit-touch-callout:none]" : ""} ${lifted ? "ring-2 ring-poke-gold/70" : ""}`}
@@ -670,23 +701,16 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
               </h3>
               <LocationChip location={acc.location} map={acc.map} />
               <ProxyChip proxy={acc.proxy} />
-              <span className="flex min-w-0 items-center gap-1.5 text-sm text-mute sm:hidden">
-                <Crosshair className="size-4 shrink-0 text-poke-gold" aria-hidden />
-                <span className="sr-only">Local atual: </span>
-                <b className="truncate font-semibold text-fg">
-                  {acc.location && !acc.location.inHunt ? acc.location.label : (acc.huntName ?? prettySlug(acc.hunt?.slug))}
-                </b>
-              </span>
             </div>
             <div className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
-                title="Abrir painel detalhado da conta (abas: Visão Geral, Equipe, Automação, Inventário, Capturas)"
+                title="Abrir painel detalhado da conta (abas: Visão Geral, Equipe, Automação)"
                 aria-label={`Abrir detalhes de ${acc.nick}`}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (!justDragged()) setDetailOpen(true);
+                  if (!justDragged()) openDetail();
                 }}
                 className="inline-flex h-7 items-center gap-1 rounded-lg border border-line bg-tile px-2 text-[11px] font-bold text-mute transition-colors hover:border-edge hover:text-poke-gold active:scale-95"
               >
@@ -709,25 +733,14 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
               </button>
               <button
                 type="button"
-                disabled={pauseBusy}
-                title={acc.paused ? "Retomar conta (reconectar e voltar para a hunt)" : "Pausar conta: vai ao Pokécentro e desconecta sem tentar reconectar"}
-                aria-label={acc.paused ? `Retomar ${acc.nick}` : `Pausar ${acc.nick}`}
+                disabled={pause.busy}
+                title={pause.error ? `Erro: ${pause.error}` : pause.pending ? "Cancelar a pausa pedida e continuar na hunt" : pause.title}
+                aria-label={`${pause.label} ${acc.nick}`}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (justDragged() || pauseBusy) return;
-                  setPauseBusy(true);
-                  void (async () => {
-                    if (acc.paused && acc.automation?.autoBestHunt) {
-                      const prio = (acc.automation.autoBestHuntPriority || "xp") as HuntOrder;
-                      const reg = acc.automation.autoBestHuntRegion || "all";
-                      const sim = await computeBestHuntSlug(id, prio, reg).catch(() => null);
-                      if (sim?.slug && sim.slug !== acc.automation.autoBestHuntSlug) {
-                        await actions.setAutomation(id, { autoBestHuntSlug: sim.slug }).catch(() => {});
-                      }
-                    }
-                    await actions.pause(id, !acc.paused);
-                  })().finally(() => setPauseBusy(false));
+                  if (justDragged()) return;
+                  void pause.toggle();
                 }}
                 className={`inline-flex h-7 items-center gap-1 rounded-lg border px-2 text-[11px] font-bold transition-colors active:scale-95 disabled:opacity-50 ${
                   acc.paused
@@ -736,7 +749,7 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
                 }`}
               >
                 {acc.paused ? <Play className="size-3.5" aria-hidden /> : <Pause className="size-3.5" aria-hidden />}
-                <span className="hidden sm:inline">{acc.paused ? "Retomar" : "Pausar"}</span>
+                <span className="hidden sm:inline">{pause.pending ? "Cancelar" : pause.label}</span>
               </button>
               <StatusPill status={acc.status} />
             </div>
@@ -789,14 +802,12 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
             {acc.farmPausePending && (acc.escapeRopes ?? 0) > 0 && (
               <button
                 type="button"
-                disabled={pauseBusy}
+                disabled={pause.busy}
                 title="Usa 1 Escape Rope para ir ao Centro Pokémon imediatamente sem perder XP e pausar"
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (pauseBusy) return;
-                  setPauseBusy(true);
-                  void actions.pause(id, true, "rope").finally(() => setPauseBusy(false));
+                  void pause.setPaused(true, "rope");
                 }}
                 className="rounded border border-edge bg-tile px-2 py-0.5 text-[11px] font-bold text-fg hover:border-poke-gold hover:text-poke-gold disabled:opacity-50"
               >
@@ -806,52 +817,24 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
             {acc.farmPausePending && (
               <button
                 type="button"
-                disabled={pauseBusy}
+                disabled={pause.busy}
                 title="Desistir do combate (centro.desistir): vai ao Pokécentro imediatamente e pausa"
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (pauseBusy) return;
                   if (!window.confirm(`Desistir do combate em ${acc.nick}, ir ao Centro Pokémon e pausar?\n\nAviso do jogo: desistir em combate pode custar até 10% do XP do nível atual (0% no Boost dos Atrasados).`)) return;
-                  setPauseBusy(true);
-                  void actions.pause(id, true, "forfeit").finally(() => setPauseBusy(false));
+                  void pause.setPaused(true, "forfeit");
                 }}
                 className="rounded border border-[#7a2f27] bg-[#32140f] px-2 py-0.5 text-[11px] font-bold text-poke-red hover:bg-[#461c15] disabled:opacity-50"
               >
                 🏳️ Sair agora
               </button>
             )}
-            <button
-              type="button"
-              disabled={pauseBusy}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (pauseBusy) return;
-                setPauseBusy(true);
-                void (async () => {
-                  if (acc.automation?.autoBestHunt) {
-                    const prio = (acc.automation.autoBestHuntPriority || "xp") as HuntOrder;
-                    const reg = acc.automation.autoBestHuntRegion || "all";
-                    const sim = await computeBestHuntSlug(id, prio, reg).catch(() => null);
-                    if (sim?.slug && sim.slug !== acc.automation.autoBestHuntSlug) {
-                      await actions.setAutomation(id, { autoBestHuntSlug: sim.slug }).catch(() => {});
-                    }
-                  }
-                  await actions.pause(id, false);
-                })().finally(() => setPauseBusy(false));
-              }}
-              className="shrink-0 rounded border border-[#2f6b3a] bg-[#16301c] px-2 py-0.5 text-[11px] font-bold text-poke-green hover:bg-[#1e4226] disabled:opacity-50"
-            >
-              {acc.farmPausePending ? "Cancelar" : "Retomar"}
-            </button>
           </div>
         </div>
       )}
 
-      {acc.huntPending && (
-        <p className="mt-1.5 truncate text-xs text-poke-gold sm:hidden">→ {acc.huntPending.name} (na fila)</p>
-      )}
+      {pause.error && <p className="mt-1.5 text-xs font-semibold text-poke-red" role="alert">{pause.error}</p>}
 
       <div className="mt-2 sm:mt-2.5">
         <AnimatePresence mode="wait" initial={false}>
@@ -933,160 +916,47 @@ function AccountCardImpl({ id, mode, index = 0, drag }: { id: string; mode: Card
         </div>
       )}
 
-      {/* Automação em tempo real (separada em Auto-Usar vs Auto-Comprar para leitura imediata) */}
-      {acc.automation && (
-        <div className="mt-2 space-y-1.5">
-          {/* Linha 1: Auto-Usar / Ações em jogo */}
-          <div className="flex flex-wrap items-center gap-1">
-            <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-mute">Auto-Usar</span>
-            {(
-              [
-                [
-                  "gameAutoPotion",
-                  acc.automation.hpLimiarPct != null ? `Poção ≤${acc.automation.hpLimiarPct}%` : "Poção",
-                  acc.automation.gameAutoPotion,
-                  { gameAutoPotion: !acc.automation.gameAutoPotion },
-                  `Usar poção equipada automaticamente quando HP ≤ ${acc.automation.hpLimiarPct ?? 40}% (configuração nativa do jogo).`,
-                ],
-                [
-                  "gameAutoRevive",
-                  "Revive",
-                  Boolean(acc.automation.gameAutoRevive),
-                  { gameAutoRevive: !acc.automation.gameAutoRevive },
-                  "Usar Revive automaticamente ao desmaiar (configuração nativa do jogo).",
-                ],
-                [
-                  "autoVoltarHunt",
-                  "Voltar à hunt ao desmaiar",
-                  Boolean(acc.automation.autoVoltarHunt),
-                  { autoVoltarHunt: !acc.automation.autoVoltarHunt },
-                  "Voltar automaticamente à hunt após desmaiar e se recuperar no Centro Pokémon.",
-                ],
-                ["autoCatch", "Capturar", acc.automation.autoCatch, { autoCatch: !acc.automation.autoCatch }, "Lançar Pokébola automaticamente em selvagens."],
-                ["autoPotionFallback", "Fallback Poção", acc.automation.autoPotionFallback, { autoPotionFallback: !acc.automation.autoPotionFallback }, "Trocar para próxima poção disponível na mochila se a atual zerar."],
-                ["autoCenter", `Centro ≤${acc.automation.autoCenterHpPct}%`, acc.automation.autoCenter, { autoCenter: !acc.automation.autoCenter }, "Ir ao Centro Pokémon automaticamente em emergência sem poções."],
-                [
-                  "autoBestHunt",
-                  acc.automation.autoBestHunt
-                    ? `Hunt (${({ xp: "XP", xpTreinador: "XP Tr.", ouro: "Ouro", shiny: "Shiny", fragmento: "Frag." } as Record<string, string>)[acc.automation.autoBestHuntPriority || "xp"] ?? "XP"}${acc.automation.autoBestHuntRegion && acc.automation.autoBestHuntRegion !== "all" ? ` · ${acc.automation.autoBestHuntRegion}` : ""})`
-                    : "Melhor Hunt",
-                  Boolean(acc.automation.autoBestHunt),
-                  { autoBestHunt: !acc.automation.autoBestHunt },
-                  `Trocar automaticamente para a melhor hunt liberada (prioridade: ${acc.automation.autoBestHuntPriority || "xp"}, região: ${acc.automation.autoBestHuntRegion || "all"}).`,
-                ],
-                ["autoPassClaim", "Passe", Boolean(acc.automation.autoPassClaim), { autoPassClaim: !acc.automation.autoPassClaim }, "Resgatar automaticamente o Passe de Batalha quando disponível."],
-              ] as [string, string, boolean, AutomationPatch, string][]
-            ).map(([key, label, on, patch, tip]) => (
-              <button
-                key={key}
-                type="button"
-                disabled={autoBusy === key || (["gameAutoPotion", "gameAutoRevive", "autoVoltarHunt"].includes(key) && acc.status !== "online")}
-                aria-pressed={on}
-                title={`${tip} — clique para ${on ? "desativar" : "ativar"}`}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (justDragged() || autoBusy) return;
-                  setAutoBusy(key);
-                  void actions.setAutomation(id, patch).finally(() => setAutoBusy(null));
-                }}
-                className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors active:scale-95 disabled:opacity-50 ${
-                  on
-                    ? "border-[#2f6b3a] bg-[#16301c]/80 text-poke-green hover:bg-[#1e4226]"
-                    : "border-line bg-void/60 text-mute/75 hover:border-edge hover:text-fg"
-                }`}
-              >
-                <span className={`size-1.5 rounded-full ${on ? "bg-poke-green" : "bg-mute/60"}`} />
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {/* Linha 2: Auto-Comprar / Reposição na loja */}
-          <div className="flex flex-wrap items-center gap-1">
-            <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-mute">Auto-Comprar</span>
-            {(
-              [
-                [
-                  "autoPotion",
-                  acc.automation.autoPotion
-                    ? `🛒 Poção (<${acc.automation.potionThreshold}→+${acc.automation.potionQty})`
-                    : "🛒 Poção",
-                  acc.automation.autoPotion,
-                  { autoPotion: !acc.automation.autoPotion },
-                  `Autocompra de poções na loja: compra ${acc.automation.potionQty} un. quando estoque ficar abaixo de ${acc.automation.potionThreshold}${acc.automation.goldReserve > 0 ? ` (piso ${fmtShort(acc.automation.goldReserve)}g)` : ""}.`,
-                ],
-                [
-                  "autoBallRestock",
-                  acc.automation.autoBallRestock
-                    ? `🛒 Bola (<${acc.automation.ballThreshold}→+${acc.automation.ballQty})`
-                    : "🛒 Bola",
-                  acc.automation.autoBallRestock,
-                  { autoBallRestock: !acc.automation.autoBallRestock },
-                  `Autocompra de Pokébolas na loja: compra ${acc.automation.ballQty} un. quando estoque ficar abaixo de ${acc.automation.ballThreshold}${acc.automation.goldReserve > 0 ? ` (piso ${fmtShort(acc.automation.goldReserve)}g)` : ""}.`,
-                ],
-                [
-                  "autoReviveRestock",
-                  acc.automation.autoReviveRestock
-                    ? `🛒 ${acc.automation.reviveId === 206 ? "Max Revive" : "Revive"} (<${acc.automation.reviveThreshold ?? 5}→+${acc.automation.reviveQty ?? 20})`
-                    : `🛒 ${acc.automation.reviveId === 206 ? "Max Revive" : "Revive"}`,
-                  Boolean(acc.automation.autoReviveRestock),
-                  { autoReviveRestock: !acc.automation.autoReviveRestock },
-                  `Autocompra de ${acc.automation.reviveId === 206 ? "Max Revive" : "Revive"} na loja: compra ${acc.automation.reviveQty ?? 20} un. quando estoque ficar abaixo de ${acc.automation.reviveThreshold ?? 5}.`,
-                ],
-              ] as [string, string, boolean, AutomationPatch, string][]
-            ).map(([key, label, on, patch, tip]) => (
-              <button
-                key={key}
-                type="button"
-                disabled={autoBusy === key}
-                title={`${tip} — clique para ${on ? "desativar" : "ativar"}`}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (justDragged() || autoBusy) return;
-                  setAutoBusy(key);
-                  void actions.setAutomation(id, patch).finally(() => setAutoBusy(null));
-                }}
-                className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors active:scale-95 disabled:opacity-50 ${
-                  on
-                    ? "border-[#7a5a1c] bg-[#33260e]/85 text-poke-gold hover:bg-[#463413]"
-                    : "border-line bg-void/60 text-mute/75 hover:border-edge hover:text-fg"
-                }`}
-              >
-                <span className={`size-1.5 rounded-full ${on ? "bg-poke-gold" : "bg-mute/60"}`} />
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <footer className="mt-2.5 hidden flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-line pt-2 text-sm text-mute sm:flex">
-        <span className="truncate">
-          {acc.location && !acc.location.inHunt ? (
-            <>
-              Local: <b className={`font-semibold ${acc.location.inCenter ? "text-poke-green" : "text-fg"}`}>{acc.location.label}</b>
-              {acc.location.detail && <> · {acc.location.detail}</>}
-            </>
-          ) : (
-            <>
-              Hunt: <b className="font-semibold text-fg">{acc.huntName ?? prettySlug(acc.hunt?.slug)}</b>
-              {acc.hunt && <> · {fmtDuration(acc.hunt.minutes)}</>}
-              {acc.hunt && acc.hunt.kills > 0 && <> · <span className="tnum">{fmtShort(acc.hunt.kills)} abates</span></>}
-            </>
-          )}
-          {acc.huntPending && <span className="ml-1.5 text-poke-gold"> → {acc.huntPending.name} (na fila)</span>}
+      {/* Hunt (único lugar do card), modo de hunt e resumo das automações: os dois abrem a aba Automação. */}
+      <footer className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-line pt-2 text-xs text-mute sm:text-sm">
+        <span className="flex min-w-0 flex-1 basis-48 items-center gap-1.5">
+          <Crosshair className="size-3.5 shrink-0 text-poke-gold sm:size-4" aria-hidden />
+          <span className="truncate">
+            Hunt: <b className="font-semibold text-fg">{acc.huntName ?? prettySlug(acc.hunt?.slug)}</b>
+            {acc.hunt && (!acc.location || acc.location.inHunt) && <> · {fmtDuration(acc.hunt.minutes)}</>}
+            {acc.hunt && acc.hunt.kills > 0 && (!acc.location || acc.location.inHunt) && <> · <span className="tnum">{fmtShort(acc.hunt.kills)} abates</span></>}
+            {acc.huntPending && <span className="ml-1.5 text-poke-gold"> → {acc.huntPending.name} (na fila)</span>}
+          </span>
         </span>
+        {acc.automation && (
+          <span className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              title="Modo de hunt (Manual, Fixa ou Automática). Clique para mudar"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!justDragged()) openDetail("automacao");
+              }}
+              className={`inline-flex max-w-[11rem] items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors hover:border-edge sm:text-[11px] ${
+                huntModeOf(acc.automation) === "manual" ? "border-line bg-void/60 text-mute" : "border-[#7a5a1c] bg-[#33260e]/85 text-poke-gold"
+              }`}
+            >
+              <span className="truncate">
+                {huntModeLabel(acc.automation, acc.automation.huntSlug && acc.automation.huntSlug === acc.hunt?.slug ? acc.huntName : null)}
+              </span>
+            </button>
+            <AutomationSummary auto={acc.automation} onOpen={() => !justDragged() && openDetail("automacao")} />
+          </span>
+        )}
         {acc.captured && (
-          <span className="tnum">
+          <span className="tnum hidden sm:inline">
             {fmtShort(acc.captured.total)} Pokémons
             {acc.captured.shiny ? ` · ${acc.captured.shiny} shiny` : ""}
           </span>
         )}
       </footer>
       <LiveModal accId={id} open={liveOpen} onClose={closeLive} />
-      <AccountDetailModal accId={id} open={detailOpen} onClose={closeDetail} onOpenLive={openLiveFromDetail} />
+      <AccountDetailModal accId={id} open={detailOpen} onClose={closeDetail} onOpenLive={openLiveFromDetail} initialTab={detailTab} />
     </motion.article>
   );
 }

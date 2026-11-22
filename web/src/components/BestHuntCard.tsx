@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Loader2, Shield, SlidersHorizontal } from "lucide-react";
+import { ArrowRight, Bot, Check, Loader2, Shield, SlidersHorizontal } from "lucide-react";
 import { useMemo, useState } from "react";
 import { HuntRow, type HuntCalc } from "@/components/HuntRow";
 import { PokemonSprite } from "@/components/Sprites";
@@ -27,20 +27,6 @@ const SAFETY_OPTS: { id: HuntSafety; label: string; title: string }[] = [
   { id: "all", label: "Qualquer risco", title: "Mostra todas as hunts viáveis, incluindo as com risco de morte" },
   { id: "no_death", label: "Sem mortes", title: "Oculta hunts onde o Pokémon pode levar 1-hit ou morrer com frequência" },
   { id: "safe50", label: "Ultra-seguras (<50% HP)", title: "Só hunts onde o pior golpe do selvagem tira menos de 50% do HP" },
-];
-
-const REGION_ORDER: { id: string; label: string }[] = [
-  { id: "kanto", label: "Kanto" },
-  { id: "outland", label: "Outland" },
-  { id: "johto", label: "Johto" },
-  { id: "hoenn", label: "Hoenn" },
-  { id: "sinnoh", label: "Sinnoh" },
-  { id: "unova", label: "Unova" },
-  { id: "kalos", label: "Kalos" },
-  { id: "alola", label: "Alola" },
-  { id: "galar", label: "Galar" },
-  { id: "paldea", label: "Paldea" },
-  { id: "orre", label: "Orre" },
 ];
 
 const SEASONAL_TYPES = [
@@ -103,10 +89,14 @@ function calcOf(l: HuntLine, rank: number, order: HuntOrder, porOvo: number): Hu
   };
 }
 
-/** Melhor hunt para o Pokémon equipado agora (motor completo do PokéIdle Guide), com prioridades, regiões e filtros. */
+/**
+ * Melhor hunt para o Pokémon equipado agora (motor completo do PokéIdle Guide), com prioridades e filtros.
+ * Região e "só liberadas" vêm do MapaView (um filtro só na tela); "Usar no Auto-Hunt" aplica a prioridade/região na conta.
+ */
 export function BestHuntCard({
   nick, order, onOrder, simOptions, onSimOptions, best, loading, error, onRetry, online, level, hunts, creatures,
   currentSlug, pendingSlug, focusSlug, busy, canHunt, onFocus, onHunt,
+  region, regionLabel, onlyOpen, autoInUse, onUseAuto,
 }: {
   nick: string;
   order: HuntOrder;
@@ -128,12 +118,19 @@ export function BestHuntCard({
   canHunt: boolean;
   onFocus: (slug: string) => void;
   onHunt: (h: Hunt) => void;
+  /** Id da região escolhida no Mapa ("" = todas). */
+  region: string;
+  regionLabel: string;
+  onlyOpen: boolean;
+  /** A conta já está no Auto-Hunt com esta prioridade e região. */
+  autoInUse: boolean;
+  onUseAuto: (order: HuntOrder, region: string) => Promise<string>;
 }) {
   const [more, setMore] = useState(false);
-  const [regionFilter, setRegionFilter] = useState("");
   const [safety, setSafety] = useState<HuntSafety>("no_death");
-  const [onlyOpen, setOnlyOpen] = useState(true);
   const [optsOpen, setOptsOpen] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
+  const [autoMsg, setAutoMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const bySlug = useMemo(() => new Map(hunts.map((h) => [h.slug, h])), [hunts]);
   const sheet = best?.sheet;
@@ -141,23 +138,11 @@ export function BestHuntCard({
   const fragUnlocked = level >= fragMin || !onlyOpen;
   const activeOrder: HuntOrder = order === "fragmento" && !fragUnlocked ? "xp" : order;
 
-  // Todas as hunts viáveis (sem filtro de região) para montar os chips de região com o melhor valor de cada uma.
   const allRanked = useMemo(
     () => rankLines(best?.lines, activeOrder, { safety, onlyOpen }).filter((l) => bySlug.has(l.slug)),
     [best, activeOrder, safety, onlyOpen, bySlug],
   );
-  const regionTops = useMemo(() => {
-    const map = new Map<string, HuntLine>();
-    for (const l of allRanked) {
-      if (l.regiao && !map.has(l.regiao)) map.set(l.regiao, l);
-    }
-    return map;
-  }, [allRanked]);
-  const activeRegion = regionFilter && regionTops.has(regionFilter) ? regionFilter : "";
-  const ranked = useMemo(
-    () => (activeRegion ? allRanked.filter((l) => l.regiao === activeRegion) : allRanked),
-    [allRanked, activeRegion],
-  );
+  const ranked = useMemo(() => (region ? allRanked.filter((l) => l.regiao === region) : allRanked), [allRanked, region]);
   const shown = ranked.slice(0, more ? MAX : SHOWN);
   const cur = best?.lines.find((l) => l.slug === currentSlug);
   const top = ranked[0];
@@ -261,17 +246,48 @@ export function BestHuntCard({
         )}
       </div>
 
+      {online && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border border-line bg-void/40 px-2.5 py-1.5 text-xs">
+          <span className="min-w-0 flex-1 text-mute">
+            Auto-Hunt com <b className="text-fg">{orderInfo.label}</b> · <b className="text-fg">{regionLabel}</b>
+            <span className="hidden sm:inline"> (o Auto-Hunt evita hunts com risco de morte quando há opção)</span>
+          </span>
+          {autoInUse ? (
+            <span className="inline-flex items-center gap-1 font-bold text-poke-green">
+              <Check className="size-3.5" aria-hidden /> Em uso no Auto-Hunt
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="btn px-2.5 py-1 text-xs font-bold"
+              disabled={autoBusy}
+              title="Coloca a conta em hunt Automática com esta prioridade e região (desliga a hunt fixa)"
+              onClick={async () => {
+                setAutoBusy(true);
+                setAutoMsg(null);
+                try {
+                  setAutoMsg({ ok: true, text: await onUseAuto(activeOrder, region) });
+                } catch (e) {
+                  setAutoMsg({ ok: false, text: e instanceof Error ? e.message : "Não foi possível ligar o Auto-Hunt." });
+                } finally {
+                  setAutoBusy(false);
+                }
+              }}
+            >
+              {autoBusy ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : <Bot className="size-3.5 text-poke-gold" aria-hidden />}
+              Usar no Auto-Hunt
+            </button>
+          )}
+          {autoMsg && (
+            <p className={`w-full ${autoMsg.ok ? "text-poke-green" : "text-poke-red"}`} role="status">
+              {autoMsg.text}
+            </p>
+          )}
+        </div>
+      )}
+
       {optsOpen && (
         <div className="tile grid gap-2.5 p-2.5 text-xs sm:grid-cols-2 lg:grid-cols-4">
-          <label className="flex cursor-pointer items-center gap-2 font-semibold">
-            <input
-              type="checkbox"
-              className="size-4 accent-[#f3c04a]"
-              checked={onlyOpen}
-              onChange={(e) => setOnlyOpen(e.target.checked)}
-            />
-            Só hunts liberadas
-          </label>
           <label className="flex cursor-pointer items-center gap-2 font-semibold" title="Simular considerando uso de poção automática">
             <input
               type="checkbox"
@@ -344,42 +360,9 @@ export function BestHuntCard({
         </p>
       ) : (
         <>
-          {/* Categorização por Região com o melhor valor de cada aba (igual ao PokéIdle Guide) */}
-          <div className="flex gap-1.5 overflow-x-auto pb-0.5" role="group" aria-label="Filtrar por região">
-            <button
-              type="button"
-              onClick={() => setRegionFilter("")}
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-bold transition-colors ${
-                activeRegion === ""
-                  ? "border-poke-gold bg-[#33260e] text-poke-gold"
-                  : "border-line bg-tile text-mute hover:text-fg"
-              }`}
-            >
-              Todas
-              {allRanked[0] && (
-                <span className="tnum text-[10px] opacity-85">{fmtChipVal(allRanked[0], activeOrder)}</span>
-              )}
-            </button>
-            {REGION_ORDER.filter((r) => regionTops.has(r.id)).map((r) => {
-              const bestReg = regionTops.get(r.id)!;
-              return (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => setRegionFilter(r.id)}
-                  title={`Melhor em ${r.label}: ${bestReg.nome}`}
-                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-bold transition-colors ${
-                    activeRegion === r.id
-                      ? "border-poke-gold bg-[#33260e] text-poke-gold"
-                      : "border-line bg-tile text-mute hover:text-fg"
-                  }`}
-                >
-                  {r.label}
-                  <span className="tnum text-[10px] opacity-85">{fmtChipVal(bestReg, activeOrder)}</span>
-                </button>
-              );
-            })}
-          </div>
+          {ranked.length === 0 && (
+            <p className="tile px-3 py-3 text-sm text-mute">Nenhuma hunt viável em {regionLabel} com esses filtros. Escolha outra região abaixo.</p>
+          )}
 
           {cur && top && (
             <p className={`tile flex flex-wrap items-center gap-x-1.5 gap-y-1 px-3 py-2 text-xs ${gain < 0.05 && !cur.umHit && cur.mortesH < 0.5 ? "!border-poke-green/50 text-poke-green" : "text-mute"}`} aria-live="polite">

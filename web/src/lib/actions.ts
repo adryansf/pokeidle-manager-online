@@ -20,6 +20,8 @@ export interface HuntResult {
   /** A conta estava em combate: a troca ficou na fila e o bot faz sozinho quando a trava acabar. */
   queued?: boolean;
   waitMs?: number;
+  /** A troca manual fixou esta hunt e desligou o Auto-Hunt (senão ele desfaria a troca). */
+  autoHuntOff?: boolean;
 }
 
 /** O Pokémon equipado de uma conta, como a calculadora de hunt precisa. */
@@ -253,7 +255,7 @@ export const actions = {
   bulkEquip: (kind: "ball" | "potion" | "revive", id: number) =>
     call<{ ok: boolean; updated: string[]; skipped: string[] }>("POST", "/api/bulk/equip", { kind, id }),
   bulkHunt: (slug: string) =>
-    call<{ ok: boolean; sent: string[]; queued: string[]; skipped: string[] }>("POST", "/api/bulk/hunt", { slug }),
+    call<{ ok: boolean; sent: string[]; queued: string[]; skipped: string[]; autoHuntOff?: string[] }>("POST", "/api/bulk/hunt", { slug }),
 };
 
 export interface HuntSpecies {
