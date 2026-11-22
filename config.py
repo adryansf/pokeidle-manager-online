@@ -133,6 +133,7 @@ class AccountConfig:
     auto_best_hunt_slug: str | None = None  # slug calculado pelo simulador do Mapa para a prioridade/região atual
     auto_pass_claim: bool = False    # resgata automaticamente o Passe de Batalha quando disponível
     pvp_auto: bool = False           # entra sozinho na fila do PVP ranqueado
+    auto_prey: bool = False          # Prey diário: roletada grátis + escolha da espécie da hunt (opt-in)
 
     @property
     def name(self) -> str:
@@ -173,6 +174,7 @@ OPTION_DEFAULTS: dict = {
     "auto_best_hunt_slug": "",
     "auto_pass_claim": False,
     "pvp_auto": False,
+    "auto_prey": False,
 }
 
 
@@ -217,6 +219,7 @@ def build_account_config(d: dict) -> AccountConfig:
         auto_best_hunt_slug=(str(o.get("auto_best_hunt_slug") or "").strip() or None),
         auto_pass_claim=bool(o.get("auto_pass_claim", False)),
         pvp_auto=bool(o["pvp_auto"]),
+        auto_prey=bool(o.get("auto_prey", False)),
     )
 
 

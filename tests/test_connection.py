@@ -305,3 +305,15 @@ def test_sim_slug_used_while_fresh_and_dropped_when_stale():
     c.estado["activeId"] = 8  # trocou o Pokémon ativo
     assert c._pick_best_hunt_for_level()["slug"] == "geodude"
 
+
+def test_recv_loop_routes_events_to_features(conn, monkeypatch):
+    notes = []
+    monkeypatch.setattr(conn.notifier, "send", lambda title, desc="", color=0, fields=None, *a, **k: notes.append(desc))
+    conn.estado["automation"] = {"autoPotion": True}
+    asyncio.run(conn._recv_loop(FakeWS([
+        {"t": "batalha", "ev": [{"k": "autoVendaDepot", "ativo": True}]},
+        {"t": "batalha", "ev": [{"k": "marketVendido", "descricao": "Rattata Nv 50", "valor": 900, "moeda": "orb"}]},
+    ])))
+    assert conn.estado["automation"]["autoVendaDepot"] is True
+    assert notes and "Rattata" in notes[0] and "Gemas" in notes[0]
+    assert [e["kind"] for e in conn.features.feed] == ["marketVendido", "autoVenda"]

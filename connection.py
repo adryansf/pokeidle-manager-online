@@ -33,6 +33,7 @@ from hunt import HuntManager
 from inventory import InventoryView
 from battle_pass import PASSE_NIVEL_MIN, pode_resgatar
 from maps import effective_tier, normalize_tiers
+from features import FeaturesManager
 from market import MarketClient
 from pvp import PvpManager
 from notify import GOLD, GREEN, RED, DailyStats, Notifier, fmt_duration, rare_icon_url
@@ -266,6 +267,8 @@ class AccountConnection:
         self.rebuild_restockers()
         self.inventory = InventoryView(self.estado)
         self.pvp = PvpManager(account.name, self.estado, auto=account.pvp_auto)
+        self.bosses_jogaveis: list[dict] = []     # welcome.bossesJogaveis (arenas com entrada e nível mínimo)
+        self.features = FeaturesManager(self)     # auto-venda, avisos, banco, anúncios, prey, boss, oferenda
         self._log = logging.LoggerAdapter(log, {})
 
     def rebuild_restockers(self) -> None:
@@ -433,6 +436,8 @@ class AccountConnection:
                 self.outland_tiers = normalize_tiers(welcome.get("outlandTiers"))
                 m = welcome.get("mercado")  # catálogo da vitrine + limites (preço mínimo, espera de compra)
                 self.mercado_cfg = m if isinstance(m, dict) else {}
+                bj = welcome.get("bossesJogaveis")
+                self.bosses_jogaveis = [b for b in bj if isinstance(b, dict)] if isinstance(bj, list) else []
                 if self.session_started is None:
                     self.session_started = time.time()
                     self._save_session()
@@ -532,6 +537,7 @@ class AccountConnection:
                 self.shop.handle_frame(msg)
                 self.market.handle_frame(msg)
                 self.pvp.handle_frame(msg)
+                self.features.handle_frame(msg)
                 if msg.get("t") == "ranking.ficha" and self.on_ficha:
                     self.on_ficha(self, msg)
                 if msg.get("t") == "pvpMensal" and self.on_pvp_month:
@@ -795,6 +801,7 @@ class AccountConnection:
                 await self._check_auto_center()
                 await self._check_auto_hunt()
                 await self._check_auto_pass()
+                await self.features.check_auto_prey()
             except Exception as e:  # noqa: BLE001
                 log.debug("[%s] safety_loop erro ignorado: %r", self.acc.name, e)
 

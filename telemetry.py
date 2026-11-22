@@ -376,6 +376,10 @@ def _automation_snapshot(c: "AccountConnection") -> dict:
         "hpLimiar": raw_limiar,
         "hpLimiarPct": hp_limiar_pct,
         "pvpAuto": bool(c.pvp.auto),
+        "autoVendaDepot": auto.get("autoVendaDepot") is True,
+        "autoPrey": bool(getattr(c.acc, "auto_prey", False)),
+        "bossAuto": bool((c.estado.get("boss") or {}).get("auto")) if isinstance(c.estado.get("boss"), dict) else False,
+        "bossAutoKey": (c.estado.get("boss") or {}).get("autoKey") if isinstance(c.estado.get("boss"), dict) else None,
     }
 
 
@@ -735,6 +739,8 @@ def create_app(
         register_market_routes(app, manager, store, auth)
         from actions_api import register_action_routes
         register_action_routes(app, manager, store, auth)
+        from features_api import register_feature_routes
+        register_feature_routes(app, manager, store, auth)
         from chat_api import register_chat_routes
         register_chat_routes(app, manager, auth)
         from pvp_api import register_pvp_routes

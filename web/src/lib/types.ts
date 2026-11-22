@@ -82,6 +82,13 @@ export interface AccountAutomation {
   hpLimiar?: number | null;
   hpLimiarPct?: number | null;
   pvpAuto: boolean;
+  /** Auto Venda do Depot do próprio jogo (estado.automation.autoVendaDepot). */
+  autoVendaDepot?: boolean;
+  /** Prey diário automático do painel (só a roletada grátis). */
+  autoPrey?: boolean;
+  /** Repetição automática do boss do jogo (estado.boss.auto) e qual boss. */
+  bossAuto?: boolean;
+  bossAutoKey?: string | null;
 }
 
 export interface AccountLocation {

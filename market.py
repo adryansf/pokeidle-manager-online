@@ -14,8 +14,9 @@ vitrine e compra foram confirmadas por captura, as demais seguem o código do cl
     orbs.painel           -> {t:"orbs", saldo, precos, saques, extrato, caixa, ...}  (SÓ LEITURA)
     market.comprar        -> batalha.ev: marketComprado | aviso market.sorteio / market.sorteioPerdeu
 
-O bot NUNCA envia `orbs.sacar` nem `banco.coins`: saque e envio de dinheiro ficam de fora de
-propósito (dinheiro real, sem estorno).
+Este cliente NUNCA envia `orbs.sacar` nem `banco.coins`: saque de Gemas fica de fora de propósito
+(dinheiro real, sem estorno). O envio de coins (ouro do jogo) só existe em features.py, pelo
+"Juntar coins" do painel, com confirmação explícita do usuário.
 """
 from __future__ import annotations
 

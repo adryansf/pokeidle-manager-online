@@ -214,6 +214,7 @@ function installMockApi(accs: AccountSnapshot[]) {
   const json = (d: unknown, status = 200) => new Response(JSON.stringify(d), { status, headers: { "content-type": "application/json" } });
   const real = window.fetch.bind(window);
   let realHunts: Promise<unknown[]> | null = null;
+  const featureMock: Record<string, { autoVendaDepot: boolean; autoPrey: boolean; bossAuto: boolean; prey: (Record<string, unknown> | null)[] }> = {};
   window.fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const path = new URL(url, location.href).pathname;
@@ -638,6 +639,69 @@ function installMockApi(accs: AccountSnapshot[]) {
       a.hunt = { slug, kills: 0, minutes: 0 };
       a.huntName = h?.nome ?? slug;
       return json({ ok: true, confirmed: true, slug });
+    }
+    // ---- Recursos extras (features.ts): visão por conta, toggles, prey, boss, mercado, oferenda e juntar coins.
+    m = path.match(/^\/api\/accounts\/(\d+)\/(features(?:\/auto-venda|\/auto-prey)?|prey\/(?:roll|choose)|boss\/(?:auto|enter|leave)|market\/listings(?:\/\d+(?:\/cancel)?)?|destroy\/candidates|oferenda|sacrificio(?:\/resgatar)?)$/);
+    if (m) {
+      const a = accs[Number(m[1]) - 1];
+      const st = (featureMock[m[1]] ??= { autoVendaDepot: false, autoPrey: false, bossAuto: false, prey: [null, null] as (Record<string, unknown> | null)[] });
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      const route = m[2];
+      if (route !== "features" && init?.method !== "GET") await wait();
+      if (route === "features/auto-venda") { st.autoVendaDepot = Boolean(body.ativo); return json({ ok: true, autoVendaDepot: st.autoVendaDepot }); }
+      if (route === "features/auto-prey") { st.autoPrey = Boolean(body.ativo); return json({ ok: true, autoPrey: st.autoPrey }); }
+      if (route === "prey/roll") {
+        st.prey[body.cartela] = { lista: [69, 70, 43, 1, 4, 7, 10, 16, 19], pk: null, bonus: "captura", est: 3, n: [0, 0, 0] };
+        return json({ ok: true, confirmed: true });
+      }
+      if (route === "prey/choose") { const c = st.prey[body.cartela]; if (c) c.pk = body.pk; return json({ ok: true, confirmed: true }); }
+      if (route === "boss/auto") { st.bossAuto = Boolean(body.ativo); return json({ ok: true, auto: st.bossAuto, key: body.key }); }
+      if (route.startsWith("boss/")) return json({ ok: true });
+      if (route.startsWith("market/listings")) return json({ ok: true, confirmed: true, extended: { ok: true, confirmed: true } });
+      if (route === "destroy/candidates") {
+        return json({ ok: true, protegidos: 2, pokemons: [
+          { id: 11, nome: "Rattata", speciesId: 19, level: 22, nota: 2.1, shiny: false, looktype: 60019, allowed: true, reason: null },
+          { id: 12, nome: "Zubat", speciesId: 41, level: 30, nota: 3.7, shiny: false, looktype: 60041, allowed: true, reason: null },
+          { id: 13, nome: "Gyarados", speciesId: 130, level: 90, nota: 4.4, shiny: true, looktype: 60130, allowed: false, reason: "shiny" },
+        ] });
+      }
+      if (route === "oferenda" || route === "sacrificio") return json({ ok: true, confirmed: true, sent: body.pokemonIds ?? [], blocked: [] });
+      if (route === "sacrificio/resgatar") return json({ ok: true, confirmed: true });
+      const names = ["Bellsprout", "Weepinbell", "Oddish", "Bulbasaur", "Charmander", "Squirtle", "Caterpie", "Pidgey", "Rattata"];
+      return json({
+        account: a.id, online: a.status === "online", gold: a.gold, level: a.level,
+        autoVendaDepot: st.autoVendaDepot, autoPrey: st.autoPrey,
+        prey: { dia: new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10), liberadas: 1, auto: st.autoPrey,
+          cartelas: st.prey.map((c) => c && { ...c, valor: 6, pkNome: c.pk ? names[(c.lista as number[]).indexOf(c.pk as number)] : null,
+            opcoes: (c.lista as number[]).map((id, k) => ({ pokeId: id, nome: names[k] })) }) },
+        boss: { auto: st.bossAuto, autoKey: st.bossAuto ? "entei" : null, bosses: [
+          { key: "entei", name: "Entei", level: 300, minLevel: 200, levelOk: true, entry: { itemId: 70001, qty: 1, name: "Boss Token" }, have: 4, entries: 4 },
+          { key: "lugia", name: "Lugia", level: 900, minLevel: 800, levelOk: a.level >= 800, entry: { itemId: 70001, qty: 3, name: "Boss Token" }, have: 4, entries: 1 },
+        ] },
+        bank: { min: 1000, feePct: 15, levelMin: 10, cooldownS: 5 },
+        market: { precoMinGold: 2, precoMinOrb: 2, taxaDiaria: 100000, diasMin: 1, diasMax: 30, taxaGoldPct: 15 },
+        events: [
+          { id: 2, ts: Date.now() - 60_000, kind: "marketVendido", text: "Vendeu 10× Leaf Stone — recebeu 8,500 coins" },
+          { id: 1, ts: Date.now() - 600_000, kind: "ovoChocou", text: "O ovo chocou: Togepi!" },
+        ],
+      });
+    }
+    if (path === "/api/coins/consolidate/preview" || path === "/api/coins/consolidate") {
+      await wait();
+      const body = JSON.parse(String(init?.body ?? "{}")) as { target: string; accounts: number[]; reserve: number };
+      const sending = path.endsWith("/consolidate");
+      const rows = body.accounts.map((id) => {
+        const a = accs[id - 1];
+        const amount = Math.max(0, (a?.gold ?? 0) - body.reserve);
+        const isTarget = a?.nick.toLowerCase() === body.target.toLowerCase();
+        const ok = !!a && !isTarget && amount >= 1000;
+        const fee = ok ? Math.ceil(amount * 0.15) : 0;
+        return { account: `acc${id}`, id, nick: a?.nick ?? null, gold: a?.gold ?? 0, level: a?.level ?? 0, amount: ok ? amount : 0, fee, net: ok ? amount - fee : 0,
+          status: ok ? (sending ? "enviado" : "ok") : "skip", detail: ok ? "" : isTarget ? "é a conta de destino" : "abaixo do mínimo de 1,000 coins acima da reserva" };
+      });
+      const okRows = rows.filter((r) => r.amount > 0);
+      const total = { accounts: okRows.length, amount: okRows.reduce((s, r) => s + r.amount, 0), fee: okRows.reduce((s, r) => s + r.fee, 0), net: okRows.reduce((s, r) => s + r.net, 0) };
+      return json(sending ? { ok: true, target: body.target, results: rows, total } : { ok: true, target: body.target, reserve: body.reserve, min: 1000, plan: rows, total });
     }
     return real(input, init);
   };
